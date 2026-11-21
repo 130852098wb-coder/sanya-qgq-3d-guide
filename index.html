@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>三亚千古情景区 · 3D实景导览与今日节目单</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./lib/three.module.min.js"
+      }
+    }
+  </script>
+  <style>
+    :root {
+      --red: #c9352b;
+      --red-dark: #9c2219;
+      --blue: #2f5896;
+      --gold: #d69e36;
+      --ink: #1f252e;
+      --muted: #646e7a;
+      --card: rgba(252, 249, 243, 0.95);
+      --safe-b: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #dbe9dc; color: var(--ink); user-select: none;
+    }
+    #app { position: relative; width: 100vw; height: 100vh; height: 100dvh; overflow: hidden; }
+    #canvasWrap { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+    #compareImg {
+      position: absolute; inset: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%;
+      object-fit: contain; object-position: center center;
+      pointer-events: none; opacity: 0; transition: opacity 0.18s ease; z-index: 4;
+    }
+    #modelLoader {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      z-index: 30; background: rgba(24, 30, 38, 0.9); color: #fff;
+      padding: 12px 18px; border-radius: 12px; font-size: 13px; font-weight: 600;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25); pointer-events: none; transition: opacity 0.3s;
+    }
+    #modelLoader.done { opacity: 0; }
+    #labelLayer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 5; }
+
+    /* 顶部公众号导览栏 */
+    .top-bar {
+      position: absolute; top: 10px; left: 10px; right: 10px; z-index: 20;
+      display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+    }
+    .brand-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      background: var(--card); backdrop-filter: blur(10px);
+      border: 1px solid rgba(201, 53, 43, 0.22); border-radius: 14px;
+      padding: 8px 12px; box-shadow: 0 6px 20px rgba(25, 35, 45, 0.12);
+      pointer-events: auto;
+    }
+    .brand-title h1 { font-size: 15px; font-weight: 800; color: var(--red-dark); letter-spacing: 0.3px; }
+    .brand-title p { font-size: 11px; color: var(--muted); margin-top: 1px; }
+    .top-actions { display: flex; gap: 6px; align-items: center; }
+    .chip-btn {
+      border: 1px solid rgba(0,0,0,0.1); background: #fff; color: var(--ink);
+      font-size: 12px; font-weight: 600; padding: 5px 9px; border-radius: 9px;
+      cursor: pointer; white-space: nowrap;
+    }
+    .chip-btn.active { background: var(--red); color: #fff; border-color: var(--red); }
+
+    .zone-scroll {
+      display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px;
+      scrollbar-width: none; pointer-events: auto;
+    }
+    .zone-scroll::-webkit-scrollbar { display: none; }
+    .zone-pill {
+      flex: 0 0 auto; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+      background: rgba(255,255,255,0.9); color: #36414d; border: 1px solid rgba(0,0,0,0.08);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07); cursor: pointer;
+    }
+    .zone-pill.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+    /* 1:1原图叠图滑杆条 */
+    .compare-bar {
+      display: none; align-items: center; gap: 8px; pointer-events: auto;
+      background: rgba(24, 30, 38, 0.88); color: #fff; padding: 7px 12px;
+      border-radius: 11px; font-size: 12px;
+    }
+    .compare-bar.show { display: flex; }
+    .compare-bar input[type="range"] { flex: 1; accent-color: var(--gold); }
+    /* 导游图同款红牌/蓝牌3D锚点标签 */
+    .v-pin {
+      position: absolute; transform: translate(-50%, -100%);
+      pointer-events: auto; cursor: pointer; z-index: 6;
+      display: flex; flex-direction: column; align-items: center;
+      transition: opacity 0.15s;
+    }
+    .v-pin .tag {
+      padding: 2.5px 7px; border-radius: 4px; font-size: 11.5px; font-weight: 700;
+      letter-spacing: 0.2px; white-space: nowrap;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.22);
+    }
+    .v-pin.red .tag { background: rgba(255, 250, 246, 0.96); color: #c5281c; border: 1.4px solid #c9352b; }
+    .v-pin.blue .tag { background: rgba(246, 250, 255, 0.96); color: #244b8a; border: 1.4px solid #2f5896; }
+    .v-pin.gate .tag { background: #c9352b; color: #fff4d6; border: 1.4px solid #f6c453; }
+    .v-pin.selected { z-index: 14; }
+    .v-pin.selected .tag { background: #c9352b; color: #fff; transform: scale(1.08); }
+    .v-pin .tip {
+      width: 0; height: 0;
+      border-left: 5px solid transparent; border-right: 5px solid transparent;
+      border-top: 6px solid #c9352b;
+    }
+    .v-pin.blue .tip { border-top-color: #2f5896; }
+    .v-pin .live-dot {
+      display: none; font-size: 9.5px; background: #ff5722; color: #fff;
+      padding: 1px 5px; border-radius: 99px; margin-bottom: 2px; font-weight: 700;
+    }
+    .v-pin.has-live .live-dot { display: inline-block; }
+
+    /* 服务设施图标点 */
+    .f-pin {
+      position: absolute; transform: translate(-50%, -50%);
+      width: 20px; height: 20px; border-radius: 5px;
+      font-size: 10.5px; font-weight: 800; color: #fff;
+      display: none; align-items: center; justify-content: center;
+      border: 1.5px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.28);
+      pointer-events: auto; cursor: pointer; z-index: 5;
+    }
+    .f-pin.show { display: flex; }
+
+    /* 右侧快捷浮动工具与12类图例面板 */
+    .side-dock {
+      position: absolute; right: 10px; top: 148px; z-index: 18;
+      display: flex; flex-direction: column; gap: 7px; align-items: flex-end;
+    }
+    .dock-btn {
+      background: var(--card); border: 1px solid rgba(0,0,0,0.12);
+      border-radius: 11px; padding: 7px 10px; font-size: 11.5px; font-weight: 700;
+      color: var(--ink); box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer;
+    }
+    .dock-btn.active { background: #1e88e5; color: #fff; border-color: #1e88e5; }
+    .legend-box {
+      display: none; width: 154px; max-height: 290px; overflow-y: auto;
+      background: rgba(255,255,255,0.96); border-radius: 12px; padding: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.16); border: 1px solid rgba(0,0,0,0.08);
+    }
+    .legend-box.open { display: block; }
+    .legend-item {
+      display: flex; align-items: center; gap: 7px; padding: 4px 5px;
+      border-radius: 6px; font-size: 11.5px; cursor: pointer;
+    }
+    .legend-item.active { background: #eef5ff; font-weight: 700; color: #1565c0; }
+    .legend-badge {
+      width: 18px; height: 18px; border-radius: 4px; color: #fff;
+      font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center;
+    }
+
+    /* 步行路线提示条 & 场馆详情浮层 */
+    .route-banner {
+      position: absolute; left: 10px; right: 106px; top: 148px; z-index: 19;
+      display: none; align-items: center; justify-content: space-between; gap: 8px;
+      background: rgba(22, 33, 46, 0.92); color: #fff; padding: 8px 12px;
+      border-radius: 12px; font-size: 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+    }
+    .route-banner.show { display: flex; }
+    .venue-card {
+      position: absolute; left: 12px; right: 12px; bottom: 258px; z-index: 22;
+      display: none; background: var(--card); backdrop-filter: blur(12px);
+      border-radius: 15px; padding: 12px 14px; border: 1px solid rgba(201,53,43,0.22);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+    }
+    .venue-card.show { display: block; }
+    .vc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+    .vc-head h3 { font-size: 15px; color: var(--red-dark); }
+    .vc-desc { font-size: 12px; color: #454f5b; line-height: 1.48; margin-bottom: 8px; }
+    .vc-shows { font-size: 11.5px; color: #244b8a; background: #f0f5fc; padding: 6px 8px; border-radius: 8px; margin-bottom: 8px; }
+    .vc-actions { display: flex; gap: 8px; }
+    .btn-primary {
+      flex: 1; background: var(--red); color: #fff; border: none; padding: 8px 10px;
+      border-radius: 9px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    }
+    .btn-outline {
+      background: #fff; color: var(--ink); border: 1px solid rgba(0,0,0,0.15);
+      padding: 8px 12px; border-radius: 9px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    /* 微信公众号风格「今日节目单」抽屉面板 */
+    .schedule-sheet {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 25;
+      height: 44vh; max-height: 82vh; min-height: 64px;
+      background: #fcfaf6; border-radius: 18px 18px 0 0;
+      box-shadow: 0 -8px 28px rgba(18, 26, 36, 0.16);
+      border-top: 1px solid rgba(201,53,43,0.18);
+      display: flex; flex-direction: column;
+      transition: height 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+      padding-bottom: var(--safe-b);
+    }
+    .schedule-sheet.snap-min { height: 68px; }
+    .schedule-sheet.snap-mid { height: 42vh; }
+    .schedule-sheet.snap-max { height: 78vh; }
+    .sheet-handle {
+      padding: 7px 14px 6px; cursor: pointer; background: #fff8f0;
+      border-radius: 18px 18px 0 0; border-bottom: 1px solid rgba(0,0,0,0.06);
+    }
+    .grab-bar { width: 38px; height: 4px; background: #d0c7bc; border-radius: 99px; margin: 0 auto 6px; }
+    .sheet-title-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+    .sheet-title-row h2 { font-size: 14.5px; font-weight: 800; color: var(--red-dark); }
+    .preset-select {
+      font-size: 11.5px; padding: 3px 7px; border-radius: 7px;
+      border: 1px solid rgba(201,53,43,0.3); background: #fff; color: var(--red-dark); font-weight: 600;
+    }
+    .time-bar {
+      display: flex; align-items: center; gap: 8px; padding: 6px 14px;
+      background: #f5efe6; font-size: 11.5px; color: #4e5660;
+    }
+    .time-bar input[type="range"] { flex: 1; accent-color: var(--red); }
+    .sched-list { flex: 1; overflow-y: auto; padding: 8px 12px 14px; display: flex; flex-direction: column; gap: 7px; }
+    .sched-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      background: #fff; border-radius: 11px; padding: 9px 11px;
+      border: 1px solid rgba(0,0,0,0.07); cursor: pointer;
+    }
+    .sched-item.highlight { border-left: 4px solid var(--red); background: #fffaf8; }
+    .sched-item.ended { opacity: 0.56; }
+    .si-time { font-size: 12.5px; font-weight: 800; color: var(--ink); min-width: 78px; }
+    .si-main { flex: 1; min-width: 0; }
+    .si-title { font-size: 13px; font-weight: 700; color: #1e242b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .si-meta { font-size: 11px; color: var(--muted); margin-top: 2px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .badge-status { font-size: 10px; padding: 1.5px 6px; border-radius: 99px; font-weight: 700; }
+    .st-live { background: #ffe4de; color: #c92a1d; }
+    .st-soon { background: #fff3d6; color: #b76e00; }
+    .st-upcoming { background: #edf2f7; color: #4a5568; }
+    .st-ended { background: #f1f3f5; color: #868e96; }
+    .go-3d-btn {
+      flex: 0 0 auto; background: #fff0ed; color: var(--red); border: 1px solid rgba(201,53,43,0.28);
+      border-radius: 8px; padding: 5px 8px; font-size: 11px; font-weight: 700;
+    }
+    .notice-foot { font-size: 10.5px; color: #7b8490; line-height: 1.45; padding: 6px 4px 2px; }
+
+    @media (min-width: 820px) {
+      .schedule-sheet { left: 14px; right: auto; width: 375px; bottom: 14px; border-radius: 16px; }
+      .schedule-sheet:not(.snap-min) { height: 62vh; }
+      .schedule-sheet.snap-min { height: 56px; }
+      .venue-card { left: auto; right: 14px; width: 330px; bottom: 14px; }
+      .top-bar { max-width: 680px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="canvasWrap"></div>
+    <img id="compareImg" src="./assets/reference_map.png" alt="官方导游图1:1比对层" />
+    <div id="labelLayer"></div>
+    <div id="modelLoader">正在加载 1:1 实景 3D 模型...</div>
+
+    <!-- 顶部品牌与区域筛选栏 -->
+    <div class="top-bar">
+      <div class="brand-row">
+        <div class="brand-title">
+          <h1>三亚千古情景区 · 3D导览</h1>
+          <p id="openHoursText">今日开园 15:00 - 21:30 ｜ 点击节目直达3D剧场</p>
+        </div>
+        <div class="top-actions">
+          <button class="chip-btn" id="btnCompare">1:1原图核对</button>
+          <button class="chip-btn" id="btnNight">夜景</button>
+          <button class="chip-btn" id="btnReset">全景</button>
+        </div>
+      </div>
+      <div class="zone-scroll" id="zoneBar"></div>
+      <div class="compare-bar" id="compareBar">
+        <span>原图叠图透明度</span>
+        <input type="range" id="compareSlider" min="0" max="100" value="55" />
+        <span id="compareVal">55%</span>
+      </div>
+    </div>
+
+    <!-- 右侧服务设施图例栏 -->
+    <div class="side-dock">
+      <button class="dock-btn" id="btnRestroomQuick">找洗手间</button>
+      <button class="dock-btn" id="btnLegendToggle">服务图例(12)</button>
+      <div class="legend-box" id="legendBox"></div>
+    </div>
+
+    <!-- 步行导航状态横幅 -->
+    <div class="route-banner" id="routeBanner">
+      <span id="routeText">已规划步行路线</span>
+      <button class="chip-btn" id="btnClearRoute">清除路线</button>
+    </div>
+
+    <!-- 场馆3D详情卡片 -->
+    <div class="venue-card" id="venueCard">
+      <div class="vc-head">
+        <h3 id="vcName">场馆名称</h3>
+        <button class="chip-btn" id="btnCloseCard">关闭</button>
+      </div>
+      <p class="vc-desc" id="vcDesc"></p>
+      <div class="vc-shows" id="vcShows"></div>
+      <div class="vc-actions">
+        <button class="btn-primary" id="btnNavFromGate">从景区入口步行导航</button>
+        <button class="btn-outline" id="btnSetStart">设为起点</button>
+      </div>
+    </div>
+
+    <!-- 微信公众号节目单抽屉 -->
+    <div class="schedule-sheet snap-mid" id="schedSheet">
+      <div class="sheet-handle" id="sheetHandle">
+        <div class="grab-bar"></div>
+        <div class="sheet-title-row">
+          <h2 id="sheetHeading">今日节目单（点击定位3D）</h2>
+          <select class="preset-select" id="presetSelect">
+            <option value="regular_two_shows">常态双场版(15:00起)</option>
+            <option value="holiday_three_shows">假日三场版(12:00起)</option>
+          </select>
+        </div>
+      </div>
+      <div class="time-bar">
+        <span id="clockLabel">预览时刻 16:30</span>
+        <input type="range" id="timeSlider" min="720" max="1290" step="5" value="990" />
+        <button class="chip-btn" id="btnNowClock">当前时间</button>
+      </div>
+      <div class="sched-list" id="schedList"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      PARK_ZONES,
+      PARK_VENUES,
+      VENUE_BY_ID,
+      FACILITY_TYPES,
+      SERVICE_FACILITIES,
+      SCHEDULE_PRESETS,
+      OFFICIAL_NOTICES,
+      findWalkingRoute,
+      getShowStatus,
+    } from './park-data.js';
+    import { createParkScene3D } from './scene-3d.js';
+
+    const state = {
+      activeZone: 'all',
+      presetKey: 'regular_two_shows',
+      nowMin: 16 * 60 + 30,
+      selectedVenueId: null,
+      startVenueId: 'entrance',
+      activeFacilityTypes: new Set(),
+      isNight: false,
+      isCompare: false,
+      snapIdx: 1, // 0=min, 1=mid, 2=max
+    };
+
+    const labelLayer = document.getElementById('labelLayer');
+    const venuePins = new Map();
+    const facPins = [];
+
+    for (const v of PARK_VENUES) {
+      const el = document.createElement('div');
+      el.className = `v-pin ${v.badgeType}`;
+      el.innerHTML = `<span class="live-dot">演出中</span><span class="tag">${v.name}</span><span class="tip"></span>`;
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectVenue(v.id, true);
+      });
+      labelLayer.appendChild(el);
+      venuePins.set(v.id, { venue: v, el });
+    }
+
+    const facTypeMap = Object.fromEntries(FACILITY_TYPES.map((t) => [t.id, t]));
+    for (const f of SERVICE_FACILITIES) {
+      const ft = facTypeMap[f.type];
+      const el = document.createElement('div');
+      el.className = 'f-pin';
+      el.style.background = ft.color;
+      el.textContent = ft.badge;
+      el.title = f.name;
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        navigateToTarget(f.id, f.name);
+        park3D.focusPoint(f.pos.x, f.pos.z, 175);
+      });
+      labelLayer.appendChild(el);
+      facPins.push({ fac: f, el });
+    }
+
+    const park3D = createParkScene3D(document.getElementById('canvasWrap'), (projectFn) => {
+      for (const { venue, el } of venuePins.values()) {
+        const zoneOk = state.activeZone === 'all' || venue.zone === state.activeZone;
+        if (!zoneOk) {
+          el.style.display = 'none';
+          continue;
+        }
+        const p = projectFn(venue.pos.x, venue.pinHeight, venue.pos.z);
+        if (!p.visible) {
+          el.style.display = 'none';
+          continue;
+        }
+        el.style.display = 'flex';
+        el.style.left = `${p.x.toFixed(1)}px`;
+        el.style.top = `${p.y.toFixed(1)}px`;
+      }
+      for (const { fac, el } of facPins) {
+        if (!state.activeFacilityTypes.has(fac.type)) {
+          el.classList.remove('show');
+          continue;
+        }
+        const p = projectFn(fac.pos.x, 3.2, fac.pos.z);
+        if (!p.visible) {
+          el.classList.remove('show');
+          continue;
+        }
+        el.classList.add('show');
+        el.style.left = `${p.x.toFixed(1)}px`;
+        el.style.top = `${p.y.toFixed(1)}px`;
+      }
+    });
+
+    // 区域筛选条初始化
+    const zoneBar = document.getElementById('zoneBar');
+    for (const z of PARK_ZONES) {
+      const btn = document.createElement('button');
+      btn.className = `zone-pill ${z.id === 'all' ? 'active' : ''}`;
+      btn.textContent = z.name;
+      btn.addEventListener('click', () => {
+        state.activeZone = z.id;
+        zoneBar.querySelectorAll('.zone-pill').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+      zoneBar.appendChild(btn);
+    }
+
+    // 12类服务设施图例初始化
+    const legendBox = document.getElementById('legendBox');
+    function renderLegend() {
+      legendBox.innerHTML = '';
+      for (const ft of FACILITY_TYPES) {
+        const row = document.createElement('div');
+        row.className = `legend-item ${state.activeFacilityTypes.has(ft.id) ? 'active' : ''}`;
+        row.innerHTML = `<span class="legend-badge" style="background:${ft.color}">${ft.badge}</span><span>${ft.name}</span>`;
+        row.addEventListener('click', () => {
+          if (state.activeFacilityTypes.has(ft.id)) state.activeFacilityTypes.delete(ft.id);
+          else state.activeFacilityTypes.add(ft.id);
+          renderLegend();
+        });
+        legendBox.appendChild(row);
+      }
+    }
+    renderLegend();
+
+    document.getElementById('btnLegendToggle').addEventListener('click', () => {
+      legendBox.classList.toggle('open');
+    });
+
+    document.getElementById('btnRestroomQuick').addEventListener('click', (e) => {
+      const on = !state.activeFacilityTypes.has('restroom');
+      if (on) state.activeFacilityTypes.add('restroom');
+      else state.activeFacilityTypes.delete('restroom');
+      e.currentTarget.classList.toggle('active', on);
+      renderLegend();
+    });
+
+    function navigateToTarget(targetId, targetLabel) {
+      const startVenue = VENUE_BY_ID[state.startVenueId] || VENUE_BY_ID.entrance;
+      const route = findWalkingRoute(startVenue.id, targetId);
+      if (!route) return;
+      park3D.showRoute(route.points3D);
+      document.getElementById('routeText').textContent =
+        `${startVenue.name} → ${targetLabel}：约 ${route.distanceMeters} 米（步行约 ${route.walkMinutes} 分钟）`;
+      document.getElementById('routeBanner').classList.add('show');
+    }
+
+    function selectVenue(venueId, alsoFly = true) {
+      const v = VENUE_BY_ID[venueId];
+      if (!v) return;
+      state.selectedVenueId = venueId;
+      for (const [id, obj] of venuePins.entries()) {
+        obj.el.classList.toggle('selected', id === venueId);
+      }
+      if (alsoFly) {
+        if (state.isCompare) toggleCompare(false);
+        park3D.focusPoint(v.pos.x, v.pos.z, 205);
+      }
+      const preset = SCHEDULE_PRESETS[state.presetKey];
+      const vShows = preset.items.filter((it) => it.venueId === venueId);
+      document.getElementById('vcName').textContent = v.name;
+      document.getElementById('vcDesc').textContent = v.summary;
+      const showBox = document.getElementById('vcShows');
+      if (vShows.length) {
+        showBox.style.display = 'block';
+        showBox.innerHTML = vShows.map((s) => `<div>• <b>${s.time}</b> ${s.title}</div>`).join('');
+      } else {
+        showBox.style.display = 'none';
+      }
+      const startName = VENUE_BY_ID[state.startVenueId]?.name || '景区入口';
+      document.getElementById('btnNavFromGate').textContent =
+        state.startVenueId === venueId ? '当前已设为起点' : `从「${startName}」步行导航`;
+      document.getElementById('venueCard').classList.add('show');
+      if (window.innerWidth < 820 && state.snapIdx === 2) setSheetSnap(1);
+    }
+
+    document.getElementById('btnCloseCard').addEventListener('click', () => {
+      document.getElementById('venueCard').classList.remove('show');
+    });
+    document.getElementById('btnNavFromGate').addEventListener('click', () => {
+      if (!state.selectedVenueId || state.selectedVenueId === state.startVenueId) return;
+      navigateToTarget(state.selectedVenueId, VENUE_BY_ID[state.selectedVenueId].name);
+      if (window.innerWidth < 820) setSheetSnap(0);
+    });
+    document.getElementById('btnSetStart').addEventListener('click', () => {
+      if (!state.selectedVenueId) return;
+      state.startVenueId = state.selectedVenueId;
+      document.getElementById('btnNavFromGate').textContent = '当前已设为起点';
+    });
+    document.getElementById('btnClearRoute').addEventListener('click', () => {
+      park3D.clearRoute();
+      document.getElementById('routeBanner').classList.remove('show');
+    });
+
+    // 1:1原图叠图校准开关、夜景与全景复位
+    const compareImg = document.getElementById('compareImg');
+    const compareBar = document.getElementById('compareBar');
+    const compareSlider = document.getElementById('compareSlider');
+    function toggleCompare(forceVal) {
+      state.isCompare = typeof forceVal === 'boolean' ? forceVal : !state.isCompare;
+      document.getElementById('btnCompare').classList.toggle('active', state.isCompare);
+      compareBar.classList.toggle('show', state.isCompare);
+      park3D.setOrthoCompare(state.isCompare);
+      compareImg.style.opacity = state.isCompare ? String(Number(compareSlider.value) / 100) : '0';
+      if (state.isCompare && window.innerWidth < 820) setSheetSnap(0);
+    }
+    document.getElementById('btnCompare').addEventListener('click', () => toggleCompare());
+    compareSlider.addEventListener('input', () => {
+      document.getElementById('compareVal').textContent = `${compareSlider.value}%`;
+      if (state.isCompare) compareImg.style.opacity = String(Number(compareSlider.value) / 100);
+    });
+
+    document.getElementById('btnNight').addEventListener('click', (e) => {
+      state.isNight = !state.isNight;
+      e.currentTarget.classList.toggle('active', state.isNight);
+      park3D.setNightMode(state.isNight);
+    });
+    document.getElementById('btnReset').addEventListener('click', () => {
+      if (state.isCompare) toggleCompare(false);
+      document.getElementById('venueCard').classList.remove('show');
+      park3D.resetOverview();
+    });
+
+    // 微信公众号「今日节目单」渲染与3D联动
+    const schedSheet = document.getElementById('schedSheet');
+    function setSheetSnap(idx) {
+      state.snapIdx = idx;
+      schedSheet.classList.remove('snap-min', 'snap-mid', 'snap-max');
+      schedSheet.classList.add(['snap-min', 'snap-mid', 'snap-max'][idx]);
+    }
+    document.getElementById('sheetHandle').addEventListener('click', (e) => {
+      if (e.target.tagName === 'SELECT') return;
+      setSheetSnap((state.snapIdx + 1) % 3);
+    });
+
+    function formatMin(m) {
+      return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    }
+
+    function renderSchedule() {
+      const preset = SCHEDULE_PRESETS[state.presetKey];
+      document.getElementById('openHoursText').textContent =
+        `今日开园 ${preset.openHours} ｜ 千古情场次 ${preset.mainShowTimes.join(' / ')}`;
+      document.getElementById('clockLabel').textContent = `预览时刻 ${formatMin(state.nowMin)}`;
+
+      const liveVenueIds = new Set();
+      const listEl = document.getElementById('schedList');
+      listEl.innerHTML = '';
+
+      for (const item of preset.items) {
+        const st = getShowStatus(item.time, state.nowMin);
+        if (st.code === 'live') liveVenueIds.add(item.venueId);
+
+        const row = document.createElement('div');
+        row.className = `sched-item ${item.highlight ? 'highlight' : ''} ${st.code === 'ended' ? 'ended' : ''}`;
+        const stClass = { live: 'st-live', soon: 'st-soon', upcoming: 'st-upcoming', ended: 'st-ended' }[st.code];
+        row.innerHTML = `
+          <div class="si-time">${item.time}</div>
+          <div class="si-main">
+            <div class="si-title">${item.title}</div>
+            <div class="si-meta">
+              <span>📍 ${item.place}</span>
+              <span class="badge-status ${stClass}">${st.label}</span>
+              ${item.tag ? `<span>${item.tag}</span>` : ''}
+            </div>
+          </div>
+          <span class="go-3d-btn">看3D</span>
+        `;
+        row.addEventListener('click', () => {
+          selectVenue(item.venueId, true);
+          if (item.isParade) {
+            park3D.showParadeRoute();
+            document.getElementById('routeText').textContent = '街头巡游动线：千古情广场 → 风情街 → 爱情街 → 绣楼广场 → 崖州古街';
+            document.getElementById('routeBanner').classList.add('show');
+          } else if (item.venueId !== state.startVenueId) {
+            navigateToTarget(item.venueId, item.place);
+          }
+          if (window.innerWidth < 820) setSheetSnap(0);
+        });
+        listEl.appendChild(row);
+      }
+
+      const foot = document.createElement('div');
+      foot.className = 'notice-foot';
+      foot.innerHTML = OFFICIAL_NOTICES.map((n, i) => `<div>${i + 1}. ${n}</div>`).join('');
+      listEl.appendChild(foot);
+
+      for (const [id, obj] of venuePins.entries()) {
+        obj.el.classList.toggle('has-live', liveVenueIds.has(id));
+      }
+    }
+
+    document.getElementById('presetSelect').addEventListener('change', (e) => {
+      state.presetKey = e.target.value;
+      renderSchedule();
+    });
+    const timeSlider = document.getElementById('timeSlider');
+    timeSlider.addEventListener('input', () => {
+      state.nowMin = Number(timeSlider.value);
+      renderSchedule();
+    });
+    document.getElementById('btnNowClock').addEventListener('click', () => {
+      const d = new Date();
+      const m = Math.min(1290, Math.max(720, d.getHours() * 60 + d.getMinutes()));
+      state.nowMin = m;
+      timeSlider.value = String(m);
+      renderSchedule();
+    });
+
+    renderSchedule();
+  </script>
+</body>
+</html>
