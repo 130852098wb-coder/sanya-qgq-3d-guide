@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>三亚千古情 · 南海女神门头局部精模360°样板</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      width: 100vw; height: 100vh; height: 100dvh; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #dce8ee; color: #1e252d; user-select: none;
+    }
+    #stage { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+    .top-head {
+      position: absolute; top: 12px; left: 12px; right: 12px; z-index: 15;
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      background: rgba(252, 249, 243, 0.94); backdrop-filter: blur(10px);
+      padding: 9px 13px; border-radius: 14px; border: 1px solid rgba(201,53,43,0.22);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+    }
+    .top-head h1 { font-size: 14.5px; font-weight: 800; color: #9c2219; }
+    .top-head p { font-size: 11px; color: #5f6975; margin-top: 2px; }
+    .back-btn {
+      text-decoration: none; background: #1f252e; color: #fff; font-size: 12px;
+      font-weight: 700; padding: 6px 11px; border-radius: 9px; white-space: nowrap;
+    }
+    #loaderBox {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      z-index: 25; background: rgba(20, 26, 34, 0.92); color: #fff;
+      padding: 13px 20px; border-radius: 12px; font-size: 13px; font-weight: 600;
+      transition: opacity 0.3s; pointer-events: none;
+    }
+    #loaderBox.hide { opacity: 0; }
+    .cam-bar {
+      position: absolute; left: 12px; right: 12px; bottom: max(14px, env(safe-area-inset-bottom));
+      z-index: 15; display: flex; gap: 7px; overflow-x: auto; padding: 8px 10px;
+      background: rgba(252, 249, 243, 0.94); backdrop-filter: blur(10px);
+      border-radius: 14px; box-shadow: 0 6px 22px rgba(0,0,0,0.15);
+      scrollbar-width: none;
+    }
+    .cam-bar::-webkit-scrollbar { display: none; }
+    .cam-btn {
+      flex: 0 0 auto; border: 1px solid rgba(0,0,0,0.12); background: #fff;
+      color: #1f252e; padding: 7px 12px; border-radius: 9px; font-size: 12px;
+      font-weight: 700; cursor: pointer;
+    }
+    .cam-btn.active { background: #c9352b; color: #fff; border-color: #c9352b; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div class="top-head">
+    <div>
+      <h1>南海女神门头广场 · 拆件精模对比样板</h1>
+      <p>Blender硬表面建筑构件 + 独立高模雕塑 + 羽叶椰林与三角梅花池</p>
+    </div>
+    <a class="back-btn" href="./index.html">返回全园导览</a>
+  </div>
+  <div id="loaderBox">正在加载局部高精度拆件模型...</div>
+  <div class="cam-bar">
+    <button class="cam-btn active" data-cam="overview">迎宾全景</button>
+    <button class="cam-btn" data-cam="goddess">女神三面像特写</button>
+    <button class="cam-btn" data-cam="elephants">白象与浮雕门楣</button>
+    <button class="cam-btn" data-cam="walkup">游客人视仰望</button>
+    <button class="cam-btn" id="btnNightToggle">夜景亮灯</button>
+  </div>
+
+  <script type="module">
+    import * as THREE from './lib/three.module.min.js';
+    import { OrbitControls } from './lib/OrbitControls.js';
+    import { GLTFLoader } from './lib/GLTFLoader.js';
+
+    const stage = document.getElementById('stage');
+    const loaderBox = document.getElementById('loaderBox');
+    const isMobile = /Android|iPhone|iPad|Mobile|MicroMessenger/i.test(navigator.userAgent);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isMobile ? 1.75 : 2.0));
+    renderer.setSize(stage.clientWidth, stage.clientHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    stage.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xcde4f2);
+    scene.fog = new THREE.FogExp2(0xcde4f2, 0.0042);
+
+    const camera = new THREE.PerspectiveCamera(42, stage.clientWidth / stage.clientHeight, 0.4, 380);
+    camera.position.set(24, 21, 64);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.maxPolarAngle = Math.PI * 0.485;
+    controls.minDistance = 12;
+    controls.maxDistance = 115;
+    controls.target.set(0, 14.0, -2);
+    controls.update();
+
+    const hemiLight = new THREE.HemisphereLight(0xf6fbff, 0x8f7d69, 0.95);
+    scene.add(hemiLight);
+
+    const sunLight = new THREE.DirectionalLight(0xfff4df, 2.15);
+    sunLight.position.set(36, 58, 42);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.set(isMobile ? 1024 : 2048, isMobile ? 1024 : 2048);
+    sunLight.shadow.camera.left = -52;
+    sunLight.shadow.camera.right = 52;
+    sunLight.shadow.camera.top = 52;
+    sunLight.shadow.camera.bottom = -52;
+    sunLight.shadow.bias = -0.0004;
+    scene.add(sunLight);
+
+    const fillLight = new THREE.DirectionalLight(0x9bc8ff, 0.55);
+    fillLight.position.set(-40, 26, -24);
+    scene.add(fillLight);
+
+    const warmGateLight = new THREE.PointLight(0xffb85c, 0, 38, 1.5);
+    warmGateLight.position.set(0, 9.5, 4.5);
+    scene.add(warmGateLight);
+
+    const goddessSpot = new THREE.SpotLight(0xffcf78, 0, 58, Math.PI * 0.28, 0.45, 1.2);
+    goddessSpot.position.set(0, 14, 24);
+    goddessSpot.target.position.set(0, 23, -1.5);
+    scene.add(goddessSpot, goddessSpot.target);
+
+    const loader = new GLTFLoader();
+    const loadGLB = (url) => new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
+
+    function prepShadows(root, cast = true, receive = true) {
+      root.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.castShadow = cast;
+          obj.receiveShadow = receive;
+        }
+      });
+    }
+
+    async function initModels() {
+      try {
+        loaderBox.textContent = '正在加载门头建筑与热带广场精模 (1/3)...';
+        const [archGltf, goddessGltf, elephantGltf] = await Promise.all([
+          loadGLB('./models/hero_goddess_arch_base.glb?v=2'),
+          loadGLB('./models/hero_goddess_bust.glb?v=2'),
+          loadGLB('./models/hero_white_elephant.glb?v=2'),
+        ]);
+
+        const arch = archGltf.scene;
+        prepShadows(arch, true, true);
+        scene.add(arch);
+
+        // 中央三面南海女神巨像（安放在须弥宝座顶面 y=16.2, z=-1.5，高15.5m）
+        const goddess = goddessGltf.scene;
+        goddess.scale.setScalar(15.5);
+        goddess.position.set(0, 16.0, -1.5);
+        goddess.rotation.y = 0;
+        prepShadows(goddess, true, true);
+        scene.add(goddess);
+
+        // 14尊高精石雕白象矩阵（严格复刻原图：前排左右各3尊小象 + 主楼高位左右各4尊巨象）
+        const eleProto = elephantGltf.scene;
+        prepShadows(eleProto, true, true);
+        const eleGroup = new THREE.Group();
+        const eleYawBase = -0.45; // 校准3/4参考图生成的象头正朝+Z迎宾方向
+
+        // 前排低层翼楼左右各3尊
+        for (const side of [-1, 1]) {
+          [12.8, 17.5, 22.2].forEach((ax) => {
+            const e = eleProto.clone(true);
+            e.scale.setScalar(4.35);
+            e.position.set(side * ax, 7.6, 5.8);
+            e.rotation.y = eleYawBase;
+            eleGroup.add(e);
+          });
+          // 主楼高位左右各4尊巨型象头（背板紧贴墙面石墩，零穿模）
+          for (let j = 0; j < 4; j++) {
+            const e = eleProto.clone(true);
+            e.scale.setScalar(6.5);
+            e.position.set(side * (14.5 + j * 6.0), 13.7, -2.9);
+            e.rotation.y = eleYawBase;
+            eleGroup.add(e);
+          }
+        }
+        scene.add(eleGroup);
+        window.__heroRig = { arch, goddess, eleGroup, camera, controls };
+
+        loaderBox.classList.add('hide');
+      } catch (err) {
+        console.error(err);
+        loaderBox.textContent = '模型加载失败：' + (err?.message || err);
+      }
+    }
+    initModels();
+
+    const CAM_PRESETS = {
+      overview: { pos: [24, 21, 64], target: [0, 14.0, -2] },
+      goddess: { pos: [5, 25.5, 29], target: [0, 23.6, -1.5] },
+      elephants: { pos: [-26, 15.5, 24], target: [-16, 12.5, 1.5] },
+      walkup: { pos: [0, 4.2, 36], target: [0, 16.0, -1.5] },
+    };
+
+    let flyAnim = null;
+    function flyTo(key) {
+      const p = CAM_PRESETS[key];
+      if (!p) return;
+      flyAnim = {
+        t: 0,
+        fromPos: camera.position.clone(),
+        toPos: new THREE.Vector3(...p.pos),
+        fromTgt: controls.target.clone(),
+        toTgt: new THREE.Vector3(...p.target),
+      };
+    }
+
+    document.querySelectorAll('.cam-btn[data-cam]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.cam-btn[data-cam]').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        flyTo(btn.dataset.cam);
+      });
+    });
+
+    let isNight = false;
+    const btnNight = document.getElementById('btnNightToggle');
+    btnNight.addEventListener('click', () => {
+      isNight = !isNight;
+      btnNight.classList.toggle('active', isNight);
+      btnNight.textContent = isNight ? '切换白天' : '夜景亮灯';
+      if (isNight) {
+        scene.background.setHex(0x0f1829);
+        scene.fog.color.setHex(0x0f1829);
+        hemiLight.intensity = 0.34;
+        sunLight.intensity = 0.28;
+        sunLight.color.setHex(0x88a8e8);
+        warmGateLight.intensity = 140;
+        goddessSpot.intensity = 220;
+        renderer.toneMappingExposure = 1.2;
+      } else {
+        scene.background.setHex(0xcde4f2);
+        scene.fog.color.setHex(0xcde4f2);
+        hemiLight.intensity = 0.95;
+        sunLight.intensity = 2.15;
+        sunLight.color.setHex(0xfff4df);
+        warmGateLight.intensity = 0;
+        goddessSpot.intensity = 0;
+        renderer.toneMappingExposure = 1.08;
+      }
+    });
+
+    controls.addEventListener('start', () => { flyAnim = null; });
+    window.addEventListener('resize', () => {
+      camera.aspect = stage.clientWidth / stage.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(stage.clientWidth, stage.clientHeight);
+    });
+
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.05);
+      if (flyAnim) {
+        flyAnim.t = Math.min(1, flyAnim.t + dt * 1.45);
+        const k = 1 - Math.pow(1 - flyAnim.t, 3);
+        camera.position.lerpVectors(flyAnim.fromPos, flyAnim.toPos, k);
+        controls.target.lerpVectors(flyAnim.fromTgt, flyAnim.toTgt, k);
+        if (flyAnim.t >= 1) flyAnim = null;
+      }
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
