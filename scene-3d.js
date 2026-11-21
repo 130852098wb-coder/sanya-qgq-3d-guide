@@ -2,6 +2,7 @@
 import * as THREE from './lib/three.module.min.js';
 import { OrbitControls } from './lib/OrbitControls.js';
 import { GLTFLoader } from './lib/GLTFLoader.js';
+import { mergeGeometries } from './lib/BufferGeometryUtils.js';
 import {
   MAP_CALIBRATION,
   PARK_VENUES,
@@ -25,202 +26,486 @@ function makeCanvasTexture(w, h, drawFn, rx = 1, ry = 1) {
   return tex;
 }
 
+const TAU = Math.PI * 2;
+const PLAZA = { x: -106.47, z: 24.40, radius: 34 };
+const HALL_CENTER = { x: 58, z: 38 };
+
+function seededRandom(seed) {
+  return () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+}
+
 function createGroundTextures() {
-  const stoneTex = makeCanvasTexture(256, 256, (ctx, w, h) => {
-    ctx.fillStyle = '#c9cdd2';
+  const random = seededRandom(7531);
+  const grassRepeat = 35 * (6000 / 1900);
+  const grass = makeCanvasTexture(512, 512, (ctx, w, h) => {
+    ctx.fillStyle = '#8ca77c';
     ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = '#a3aab2';
-    ctx.lineWidth = 2;
-    for (let y = 0; y < h; y += 32) {
-      const sh = (y / 32) % 2 === 0 ? 0 : 32;
-      for (let x = -32; x < w; x += 64) {
-        ctx.fillStyle = (x + y) % 64 === 0 ? '#d2d6db' : '#c0c5cb';
-        ctx.fillRect(x + sh + 1, y + 1, 62, 30);
-        ctx.strokeRect(x + sh, y, 64, 32);
+    // Wrap each organic wash across tile edges, including the four corners.
+    for (let i = 0; i < 720; i++) {
+      const x = random() * w, y = random() * h, size = 8 + random() * 65;
+      for (const dx of [-w, 0, w]) {
+        for (const dy of [-h, 0, h]) {
+          const px = x + dx, py = y + dy;
+          if (px < -size || px > w + size || py < -size || py > h + size) continue;
+          const wash = ctx.createRadialGradient(px, py, 0, px, py, size);
+          wash.addColorStop(0, i % 3 ? '#809c7059' : '#8ca77cb3');
+          wash.addColorStop(1, '#809c7000');
+          ctx.fillStyle = wash;
+          ctx.fillRect(px - size, py - size, size * 2, size * 2);
+        }
       }
     }
-  }, 22, 22);
-
-  const grassTex = makeCanvasTexture(256, 256, (ctx, w, h) => {
-    const g = ctx.createLinearGradient(0, 0, w, h);
-    g.addColorStop(0, '#9bbd82');
-    g.addColorStop(0.5, '#8eb275');
-    g.addColorStop(1, '#a4c48b');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-    for (let i = 0; i < 800; i++) {
-      ctx.fillStyle = i % 2 === 0 ? 'rgba(105,142,78,0.24)' : 'rgba(186,210,152,0.22)';
-      ctx.fillRect((i * 73) % w, (i * 137) % h, 3, 3);
+    for (let i = 0; i < 24000; i++) {
+      const x = random() * w, y = random() * h;
+      ctx.strokeStyle = i % 3 ? 'rgba(61,86,53,0.09)' : 'rgba(224,220,170,0.22)';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 0.5 + random() * 2, y - random() * 2);
+      ctx.stroke();
     }
-  }, 16, 16);
+  }, grassRepeat, grassRepeat);
 
-  const poolTex = makeCanvasTexture(128, 128, (ctx, w, h) => {
-    for (let y = 0; y < h; y += 32) {
-      for (let x = 0; x < w; x += 32) {
-        ctx.fillStyle = (x / 32 + y / 32) % 2 === 0 ? '#1ca6c6' : '#35cbe8';
-        ctx.fillRect(x, y, 32, 32);
+  const stone = makeCanvasTexture(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#d5d0c8';
+    ctx.fillRect(0, 0, w, h);
+    for (let row = 0; row < 8; row++) {
+      for (let col = -1; col < 4; col++) {
+        const x = col * 64 + (row % 2) * 32, y = row * 32;
+        ctx.fillStyle = 'rgba(154,144,124,' + random() * 0.09 + ')';
+        ctx.fillRect(x, y, 64, 32);
+        ctx.strokeStyle = 'rgba(132,122,105,0.32)';
+        ctx.lineWidth = 0.85;
+        ctx.strokeRect(x, y, 64, 32);
       }
     }
-  }, 3, 3);
-
-  return { stoneTex, grassTex, poolTex };
+    for (let i = 0; i < 9200; i++) {
+      ctx.fillStyle = i % 2 ? 'rgba(98,94,86,.11)' : 'rgba(255,251,243,.39)';
+      ctx.fillRect(random() * w, random() * h, 0.8, 0.8);
+    }
+  });
+  return { grass, stone };
 }
 
-function buildTropicalTree(x, z, scale, isPalm, palmTrunkMat, palmLeafMat, banyanMat) {
-  const g = new THREE.Group();
-  g.position.set(x, 0, z);
-  if (isPalm) {
-    const h = 8.2 * scale;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.24 * scale, 0.44 * scale, h, 7), palmTrunkMat);
-    trunk.position.y = h * 0.5;
-    trunk.rotation.z = 0.06;
-    trunk.castShadow = true;
-    g.add(trunk);
-    for (let i = 0; i < 6; i++) {
-      const frond = new THREE.Mesh(new THREE.ConeGeometry(1.05 * scale, 4.0 * scale, 5), palmLeafMat);
-      const ang = (i * Math.PI * 2) / 6;
-      frond.position.set(Math.cos(ang) * 1.45 * scale, h - 0.2, Math.sin(ang) * 1.45 * scale);
-      frond.rotation.z = -Math.cos(ang) * 1.15;
-      frond.rotation.x = Math.sin(ang) * 1.15;
-      g.add(frond);
-    }
-  } else {
-    const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(2.7 * scale, 1), banyanMat);
-    crown.position.y = 4.2 * scale;
-    crown.scale.y = 0.72;
-    crown.castShadow = true;
-    g.add(crown);
+// All paving shares a world-space grain, even where rounded path joints overlap.
+function stoneUV(geometry) {
+  const pos = geometry.getAttribute('position'), uv = geometry.getAttribute('uv');
+  for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / 8, pos.getZ(i) / 8);
+  return geometry;
+}
+
+function floorPatch(width, depth, x, z, height, yaw = 0) {
+  return stoneUV(new THREE.PlaneGeometry(width, depth).rotateX(-Math.PI / 2).rotateY(yaw).translate(x, height, z));
+}
+
+function floorDisc(radius, x, z, height, segments = 28) {
+  return stoneUV(new THREE.CircleGeometry(radius, segments).rotateX(-Math.PI / 2).translate(x, height, z));
+}
+
+function batchedFloor(root, pieces, material) {
+  const mesh = new THREE.Mesh(mergeGeometries(pieces), material);
+  mesh.receiveShadow = true;
+  root.add(mesh);
+  pieces.forEach(geometry => geometry.dispose());
+}
+
+function avenueHeading(ave) {
+  return Math.atan2(ave.cx - HALL_CENTER.x, ave.cz - HALL_CENTER.z);
+}
+
+function buildPaving(root, stone) {
+  const paving = new THREE.MeshStandardMaterial({ map: stone, roughness: 0.9 });
+  const curb = new THREE.MeshStandardMaterial({ color: 0xe0d9cb, roughness: 0.85 });
+  const beds = [], paths = [];
+  for (const [a, b] of ROAD_EDGES) {
+    const start = ROAD_NODES[a].pos, end = ROAD_NODES[b].pos;
+    const dx = end.x - start.x, dz = end.z - start.z;
+    const length = Math.hypot(dx, dz), yaw = -Math.atan2(dz, dx);
+    const x = (start.x + end.x) / 2, z = (start.z + end.z) / 2;
+    beds.push(floorPatch(length, 7.84, x, z, 0.12, yaw));
+    paths.push(floorPatch(length, 7.2, x, z, 0.16, yaw));
   }
-  return g;
+  for (const { pos } of Object.values(ROAD_NODES)) {
+    beds.push(floorDisc(3.92, pos.x, pos.z, 0.12));
+    paths.push(floorDisc(3.6, pos.x, pos.z, 0.16));
+  }
+  batchedFloor(root, beds, curb);
+  batchedFloor(root, paths, paving);
+  return paving;
 }
 
-function buildParkGroundAndPools(venueMap, texs, animHooks, stateRef) {
-  const root = new THREE.Group();
-  const stoneMat = new THREE.MeshStandardMaterial({ map: texs.stoneTex, roughness: 0.86 });
-  const grassMat = new THREE.MeshStandardMaterial({ map: texs.grassTex, roughness: 0.92 });
-  const poolMat = new THREE.MeshStandardMaterial({ map: texs.poolTex, roughness: 0.22, metalness: 0.1 });
-  const palmTrunkMat = new THREE.MeshStandardMaterial({ color: 0x765638, roughness: 0.85 });
-  const palmLeafMat = new THREE.MeshStandardMaterial({ color: 0x49843e, roughness: 0.72 });
-  const banyanMat = new THREE.MeshStandardMaterial({ color: 0x558946, roughness: 0.78 });
+function buildPlazaInlay() {
+  const texture = makeCanvasTexture(1024, 1024, (ctx, w) => {
+    ctx.translate(w / 2, w / 2);
+    ctx.scale(w / (2 * PLAZA.radius), w / (2 * PLAZA.radius));
+    ctx.strokeStyle = '#bda67c';
+    ctx.fillStyle = '#d3bd94';
+    for (const [radius, weight] of [[2.1, .38], [5.2, .22], [6.1, .42], [14, .13], [23.5, .16], [26.8, .6], [27.7, .14], [32, .4], [33.2, .15]]) {
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, TAU);
+      ctx.lineWidth = weight;
+      ctx.stroke();
+    }
+    for (let i = 0; i < 32; i++) {
+      ctx.save();
+      ctx.rotate(TAU * i / 32);
+      ctx.lineWidth = .12;
+      ctx.beginPath();
+      ctx.moveTo(6.3, 0);
+      ctx.lineTo(26.4, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(27.8, 0);
+      ctx.lineTo(29.7, .78);
+      ctx.lineTo(31.7, 0);
+      ctx.lineTo(29.7, -.78);
+      ctx.closePath();
+      ctx.fill();
+      if (i % 4 === 0) {
+        ctx.beginPath();
+        ctx.moveTo(2.35, -.45);
+        ctx.lineTo(4.7, 0);
+        ctx.lineTo(2.35, .45);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  });
+  const inlay = new THREE.Mesh(new THREE.PlaneGeometry(68, 68).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }));
+  inlay.position.set(PLAZA.x, .31, PLAZA.z);
+  return inlay;
+}
 
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(820, 820), grassMat);
-  ground.rotation.x = -Math.PI * 0.5;
+function buildParkGroundAndPools(venueMap, textures, animHooks, state) {
+  const root = new THREE.Group();
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(3000, 72).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({ map: textures.grass, roughness: 1 }));
   ground.receiveShadow = true;
   root.add(ground);
-
-  // 千古情广场圆形石坪、爱情广场、绣楼广场与图腾大道石阶
-  const rp = venueMap.romance_plaza.pos;
-  const mandala = new THREE.Mesh(new THREE.CylinderGeometry(38, 38, 0.25, 40), stoneMat);
-  mandala.position.set(rp.x, 0.12, rp.z);
-  mandala.receiveShadow = true;
-  root.add(mandala);
-
-  for (const [vid, w, d] of [['love_plaza', 52, 46], ['xiulou_plaza', 62, 54]]) {
-    const p = venueMap[vid].pos;
-    const pl = new THREE.Mesh(new THREE.BoxGeometry(w, 0.24, d), stoneMat);
-    pl.position.set(p.x, 0.12, p.z);
-    pl.receiveShadow = true;
-    root.add(pl);
-  }
-
+  const paving = buildPaving(root, textures.stone);
   const ave = venueMap.totem_ave.box;
-  const aveDeck = new THREE.Mesh(new THREE.BoxGeometry(ave.wx, 0.4, ave.dz), stoneMat);
-  aveDeck.position.set(ave.cx, 0.2, ave.cz);
-  aveDeck.rotation.y = -ave.yawRad;
-  aveDeck.receiveShadow = true;
-  root.add(aveDeck);
-
-  for (const [a, b] of ROAD_EDGES) {
-    const pa = ROAD_NODES[a].pos;
-    const pb = ROAD_NODES[b].pos;
-    const dx = pb.x - pa.x;
-    const dz = pb.z - pa.z;
-    const seg = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(dx, dz) + 7, 0.2, 10.5), stoneMat);
-    seg.position.set((pa.x + pb.x) * 0.5, 0.1, (pa.z + pb.z) * 0.5);
-    seg.rotation.y = -Math.atan2(dz, dx);
-    seg.receiveShadow = true;
-    root.add(seg);
+  const squares = [floorDisc(PLAZA.radius, PLAZA.x, PLAZA.z, .28, 112),
+    floorPatch(ave.wx, ave.dz, ave.cx, ave.cz, .26, avenueHeading(ave))];
+  for (const [id, width, depth] of [['love_plaza', 48, 44], ['xiulou_plaza', 62, 54]]) {
+    const { x, z } = venueMap[id].pos;
+    squares.push(floorPatch(width, depth, x, z, .24));
   }
+  batchedFloor(root, squares, paving);
+  root.add(buildPlazaInlay());
 
-  // 喊泉喷泉池与动态水柱 + 戏水区蓝绿方格池
-  for (const box of [venueMap.shouting_fountain.waterBox, venueMap.water_play.box]) {
-    const pm = new THREE.Mesh(new THREE.BoxGeometry(box.wx, 0.9, box.dz), poolMat);
-    pm.position.set(box.cx, 0.45, box.cz);
-    pm.rotation.y = -box.yawRad;
-    root.add(pm);
+  const a = uvToXZ(0, 442), b = uvToXZ(402, 598);
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const highway = new THREE.Mesh(floorPatch(Math.hypot(dx, dz) + 95, 16,
+    (a.x + b.x) / 2 + 24, (a.z + b.z) / 2 + 12, .14, -Math.atan2(dz, dx)),
+    new THREE.MeshStandardMaterial({ color: 0x67716e, roughness: 1 }));
+  root.add(highway);
+  buildWater(root, venueMap, textures.stone, animHooks, state);
+  buildPlanting(root, venueMap);
+  return root;
+}
+
+function buildWater(root, venues, stone, animHooks, state) {
+  const depthMap = makeCanvasTexture(128, 256, (ctx, w, h) => {
+    const depth = ctx.createLinearGradient(0, 0, w, h);
+    depth.addColorStop(0, '#178fa8');
+    depth.addColorStop(0.55, '#219fae');
+    depth.addColorStop(1, '#2ec4d6');
+    ctx.fillStyle = depth;
+    ctx.fillRect(0, 0, w, h);
+  });
+  const ripple = makeCanvasTexture(256, 256, (ctx, w, h) => {
+    for (let i = -1; i < 17; i++) {
+      const base = h * i / 16;
+      ctx.beginPath();
+      for (let x = 0; x <= w; x += 2) {
+        const y = base + 4 * Math.sin(x / w * TAU + i * Math.PI / 4)
+          + 1.5 * Math.sin(x / w * TAU * 3 - i * Math.PI / 2);
+        if (x) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      }
+      ctx.strokeStyle = i % 2 ? 'rgba(218,255,246,.65)' : 'rgba(255,255,244,.35)';
+      ctx.lineWidth = i % 2 ? 1.45 : .8;
+      ctx.stroke();
+    }
+  });
+  const water = new THREE.MeshStandardMaterial({ map: depthMap, roughness: .26, metalness: .08 });
+  const waves = new THREE.MeshBasicMaterial({ map: ripple, transparent: true, opacity: .32, depthWrite: false });
+  const sill = new THREE.MeshStandardMaterial({ map: stone, color: 0xeee6d9, roughness: .77 });
+  for (const box of [venues.shouting_fountain.waterBox, venues.water_play.box]) {
+    const well = new THREE.Group();
+    well.position.set(box.cx, 0, box.cz);
+    well.rotation.y = -box.yawRad;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(box.wx, .72, box.dz), sill);
+    body.position.y = .36;
+    body.receiveShadow = true;
+    well.add(body);
+    const width = box.wx - 1.2, depth = box.dz - 1.2;
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(width, depth).rotateX(-Math.PI / 2), water);
+    surface.position.y = .75;
+    well.add(surface);
+    const veil = new THREE.Mesh(floorPatch(width, depth, 0, 0, .77), waves);
+    well.add(veil);
+    for (const sign of [-1, 1]) {
+      const long = new THREE.Mesh(new THREE.BoxGeometry(.62, .24, box.dz), sill);
+      long.position.set(sign * (box.wx - .62) / 2, .76, 0);
+      const end = new THREE.Mesh(new THREE.BoxGeometry(width, .24, .62), sill);
+      end.position.set(0, .76, sign * (box.dz - .62) / 2);
+      well.add(long, end);
+    }
+    root.add(well);
   }
-
-  const fb = venueMap.shouting_fountain.waterBox;
-  const jetGroup = new THREE.Group();
-  jetGroup.position.set(fb.cx, 0, fb.cz);
-  jetGroup.rotation.y = -fb.yawRad;
-  const jets = [];
+  const mist = makeCanvasTexture(8, 128, (ctx, w, h) => {
+    const fade = ctx.createLinearGradient(0, 0, 0, h);
+    fade.addColorStop(0, 'rgba(248,255,255,0)');
+    fade.addColorStop(.27, 'rgba(249,255,255,.85)');
+    fade.addColorStop(.82, 'rgba(201,239,239,.6)');
+    fade.addColorStop(1, 'rgba(219,252,250,.08)');
+    ctx.fillStyle = fade;
+    ctx.fillRect(0, 0, w, h);
+  });
+  const dot = makeCanvasTexture(32, 32, (ctx, w) => {
+    const fade = ctx.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
+    fade.addColorStop(0, 'white');
+    fade.addColorStop(.38, 'rgba(239,255,255,.85)');
+    fade.addColorStop(1, 'rgba(239,255,255,0)');
+    ctx.fillStyle = fade;
+    ctx.fillRect(0, 0, w, w);
+  });
+  const spray = new THREE.PointsMaterial({ map: dot, size: .54, transparent: true, opacity: .86, depthWrite: false });
+  const cones = [[.12, .40, 8.4, .8], [.67, .27, 9.2, .47], [1.25, .16, 8.6, .23]].map(([top, bottom, h, opacity]) => ({
+    geo: new THREE.CylinderGeometry(top, bottom, h, 14, 1, true).translate(0, h / 2, 0),
+    mat: new THREE.MeshBasicMaterial({ map: mist, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false }),
+  }));
+  const box = venues.shouting_fountain.waterBox, jets = [], random = seededRandom(829);
+  const jetsGroup = new THREE.Group();
+  jetsGroup.position.set(box.cx, .78, box.cz);
+  jetsGroup.rotation.y = -box.yawRad;
   for (let i = 0; i < 4; i++) {
-    const jet = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.42, 0.95, 9.5, 8),
-      new THREE.MeshBasicMaterial({ color: 0xeafcff, transparent: true, opacity: 0.85 })
-    );
-    jet.position.set(0, 5.2, -fb.dz * 0.34 + (fb.dz * 0.68 * i) / 3);
-    jetGroup.add(jet);
-    jets.push(jet);
+    const jet = new THREE.Group(), drops = [];
+    for (const { geo, mat } of cones) jet.add(new THREE.Mesh(geo, mat));
+    for (let n = 0; n < 42; n++) {
+      const angle = random() * TAU, r = Math.sqrt(random()) * 1.55;
+      drops.push(Math.cos(angle) * r, 8.5 + random() * 1.2 - r * r * .7, Math.sin(angle) * r);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(drops, 3));
+    const foam = new THREE.Points(geometry, spray);
+    jet.add(foam);
+    jet.position.z = box.dz * (-.32 + .64 * i / 3);
+    jetsGroup.add(jet);
+    jets.push({ jet, foam });
   }
-  root.add(jetGroup);
-  animHooks.push((t) => {
-    const boost = stateRef.fountainBoost > 0 ? 1.8 : 1.0;
-    if (stateRef.fountainBoost > 0) stateRef.fountainBoost -= 0.016;
-    jets.forEach((j, idx) => {
-      const s = (0.65 + 0.42 * Math.abs(Math.sin(t * 3.8 + idx * 0.9))) * boost;
-      j.scale.y = s;
-      j.position.y = 0.8 + 4.6 * s;
+  root.add(jetsGroup);
+  animHooks.push(time => {
+    ripple.offset.set(time * .043, time * .024);
+    jets.forEach(({ jet, foam }, i) => {
+      jet.scale.y = (.83 + .2 * Math.sin(time * 2.7 + i * 1.5)) * (time < state.fountainBoostUntil ? 1.6 : 1);
+      foam.rotation.y = time * .6 + i;
     });
   });
+}
 
-  // 迎宾路公路与周边椰林绿化带
-  const r0 = uvToXZ(0, 442), r1 = uvToXZ(402, 598);
-  const hwy = new THREE.Mesh(
-    new THREE.BoxGeometry(Math.hypot(r1.x - r0.x, r1.z - r0.z) + 95, 0.28, 16),
-    new THREE.MeshStandardMaterial({ color: 0x4d545e, roughness: 0.9 })
-  );
-  hwy.position.set((r0.x + r1.x) * 0.5 + 24, 0.14, (r0.z + r1.z) * 0.5 + 12);
-  hwy.rotation.y = -Math.atan2(r1.z - r0.z, r1.x - r0.x);
-  root.add(hwy);
+function palmGeometry() {
+  const vertices = [], colors = [];
+  function triangle(a, b, c, tint) {
+    vertices.push(...a, ...b, ...c);
+    const color = new THREE.Color(tint);
+    for (let n = 0; n < 3; n++) colors.push(color.r, color.g, color.b);
+  }
+  const height = 9, bend = 1.15;
+  function trunkPoint(t, a) {
+    const r = .38 - .18 * t + .09 * Math.max(0, 1 - 5 * t);
+    return [bend * t * t + Math.cos(a) * r, height * t, -.48 * Math.sin(t * Math.PI) + Math.sin(a) * r];
+  }
+  for (let y = 0; y < 12; y++) {
+    for (let side = 0; side < 8; side++) {
+      const a = TAU * side / 8, b = TAU * (side + 1) / 8;
+      const p = trunkPoint(y / 12, a), q = trunkPoint(y / 12, b);
+      const r = trunkPoint((y + 1) / 12, b), s = trunkPoint((y + 1) / 12, a);
+      const tint = y % 3 === 0 ? 0x9d8963 : 0x847459;
+      triangle(p, s, q, tint); triangle(q, s, r, tint);
+    }
+  }
+  const greens = [0x426e49, 0x497d50, 0x58875a, 0x396b48, 0x6c945e];
+  for (let frond = 0; frond < 10; frond++) {
+    const a = TAU * frond / 10 + .09 * Math.sin(frond * 4);
+    const length = 4.6 + .9 * Math.cos(frond * 3), lift = 1.35 + .45 * Math.sin(frond * 2);
+    function leaf(t, side, down = 0) {
+      const reach = t * length, fan = .28 * Math.sin(Math.PI * t) + side;
+      return [bend + Math.cos(a) * reach - Math.sin(a) * fan,
+        height + Math.sin(Math.PI * t) * lift - 1.85 * t * t + down,
+        Math.sin(a) * reach + Math.cos(a) * fan];
+    }
+    for (let k = 0; k < 9; k++) {
+      const t = k / 9, next = (k + 1) / 9;
+      const half = .115 * (1 - t) + .02;
+      triangle(leaf(t, -half), leaf(t, half), leaf(next, 0), 0x73935b);
+      for (const sign of [-1, 1]) {
+        const spread = .19 + .88 * Math.sin(Math.PI * (.12 + t * .84));
+        const tip = leaf(Math.min(1.05, t + .19), sign * spread, -.26 - .31 * spread);
+        triangle(leaf(t, 0), tip, leaf(next + .015, sign * .025), greens[(frond + k + (sign + 1)) % greens.length]);
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
-  const treeUVs = [
-    [95, 240], [112, 398], [168, 435], [248, 456], [358, 412], [412, 392], [435, 424],
-    [548, 488], [648, 476], [706, 442], [755, 382], [728, 318], [685, 268], [625, 255],
-    [322, 295], [285, 202], [548, 72], [652, 48], [742, 68], [828, 92], [892, 128],
-    [972, 248], [912, 312], [852, 432], [58, 336], [198, 168],
-  ];
-  treeUVs.forEach(([u, v], i) => {
-    const tp = uvToXZ(u, v);
-    root.add(buildTropicalTree(tp.x, tp.z, 0.9 + (i % 3) * 0.15, i % 2 === 0, palmTrunkMat, palmLeafMat, banyanMat));
+function clusterGeometry(flowering) {
+  const pieces = [], random = seededRandom(flowering ? 705 : 8421);
+  function painted(geometry, color) {
+    const tint = new THREE.Color(color), count = geometry.getAttribute('position').count;
+    const rgb = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) rgb.set([tint.r, tint.g, tint.b], i * 3);
+    geometry.setAttribute('color', new THREE.BufferAttribute(rgb, 3));
+    pieces.push(geometry);
+  }
+  const height = flowering ? 1.7 : 5.9;
+  const trunk = new THREE.CylinderGeometry(.17, flowering ? .25 : .46, height, 7).toNonIndexed();
+  painted(trunk.translate(0, height / 2, 0), 0x726852);
+  const shade = flowering ? [0x51754d, 0x627f4d, 0x3b6448] : [0x40694c, 0x517751, 0x66875b];
+  const size = flowering ? 1.5 : 2.6;
+  for (let i = 0; i < 10; i++) {
+    const angle = i * 2.39996, offset = Math.sqrt(i / 9) * size;
+    const x = Math.cos(angle) * offset, z = Math.sin(angle) * offset;
+    const y = height + size * (.77 - i / 12) + random() * .45;
+    painted(new THREE.IcosahedronGeometry(size * (.62 + random() * .44), 1)
+      .scale(1.16, .85, 1).translate(x, y, z), shade[i % shade.length]);
+    if (flowering) {
+      for (let k = 0; k < 3; k++) {
+        const blossom = new THREE.IcosahedronGeometry(.29 + random() * .26, 0);
+        painted(blossom.translate(x + (random() - .5) * 1.5, y + .6 + random() * .56,
+          z + (random() - .5) * 1.5), [0xc65369, 0xac435d, 0xdd7783][(i + k) % 3]);
+      }
+    }
+  }
+  const result = mergeGeometries(pieces);
+  pieces.forEach(piece => piece.dispose());
+  return result;
+}
+
+function plantingSites(venues) {
+  const sites = [], random = seededRandom(18171);
+  const buildings = buildParkGLBPlacements(venues);
+  const pools = [venues.shouting_fountain.waterBox, venues.water_play.box];
+  const roads = ROAD_EDGES.map(([a, b]) => [ROAD_NODES[a].pos, ROAD_NODES[b].pos]);
+  function roomFor(x, z) {
+    if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + 3) return false;
+    for (const [id, hw, hd] of [['love_plaza', 27, 25], ['xiulou_plaza', 34, 30]]) {
+      const p = venues[id].pos;
+      if (Math.abs(x - p.x) < hw && Math.abs(z - p.z) < hd) return false;
+    }
+    const ave = venues.totem_ave.box, turn = avenueHeading(ave);
+    const ax = x - ave.cx, az = z - ave.cz;
+    if (Math.abs(Math.cos(turn) * ax - Math.sin(turn) * az) < ave.wx / 2 + 3 &&
+        Math.abs(Math.sin(turn) * ax + Math.cos(turn) * az) < ave.dz / 2 + 3) return false;
+    if ([...buildings, ...pools].some(p => Math.abs(x - p.cx) < p.wx / 2 + 2.6 &&
+      Math.abs(z - p.cz) < p.dz / 2 + 2.6)) return false;
+    for (const [a, b] of roads) {
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const k = THREE.MathUtils.clamp(((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz), 0, 1);
+      if (Math.hypot(x - a.x - dx * k, z - a.z - dz * k) < 6.7) return false;
+    }
+    return sites.every(p => Math.hypot(x - p.x, z - p.z) >= 4.7);
+  }
+  function plant(kinds, candidate) {
+    let placed = 0;
+    for (let i = 0; placed < kinds.length && i < 6000; i++) {
+      const { x, z } = candidate();
+      if (!roomFor(x, z)) continue;
+      sites.push({ kind: kinds[placed++], x, z, scale: .83 + random() * .48, yaw: random() * TAU });
+    }
+  }
+  const mix = (palms, banyans, flowers) => [
+    ...Array(palms).fill('palm'), ...Array(banyans).fill('banyan'), ...Array(flowers).fill('flowers')];
+  plant(mix(12, 0, 8), () => {
+    const a = random() * TAU, r = Math.sqrt(random());
+    return { x: -66 + 32 * r * Math.cos(a), z: 68.5 + 9 * r * Math.sin(a) };
   });
-  return root;
+  const perimeter = [[52,340],[72,271],[140,204],[226,159],[341,126],[480,80],[600,57],
+    [706,62],[824,91],[937,132],[989,214],[958,283],[904,355],[823,429],[708,458],
+    [623,478],[555,483],[507,500],[377,481],[291,449],[184,435],[90,395]].map(uv => uvToXZ(...uv));
+  plant(mix(49, 5, 0), () => {
+    const i = Math.floor(random() * perimeter.length), a = perimeter[i], b = perimeter[(i + 1) % perimeter.length];
+    const t = random();
+    return { x: a.x + (b.x - a.x) * t + (random() - .5) * 18,
+      z: a.z + (b.z - a.z) * t + (random() - .5) * 18 };
+  });
+  plant(mix(25, 3, 2), () => {
+    const [a, b] = roads[Math.floor(random() * roads.length)];
+    const dx = b.x - a.x, dz = b.z - a.z, t = random();
+    const edge = (random() < .5 ? -1 : 1) * (7 + random() * 9) / Math.hypot(dx, dz);
+    return { x: a.x + dx * t - dz * edge, z: a.z + dz * t + dx * edge };
+  });
+  plant(mix(10, 3, 1), () => {
+    const p = [venues.romance_plaza, venues.love_plaza, venues.xiulou_plaza][Math.floor(random() * 3)];
+    const angle = random() * TAU, r = 37 + random() * 9;
+    return { x: p.pos.x + r * Math.cos(angle), z: p.pos.z + r * Math.sin(angle) };
+  });
+  return sites;
+}
+
+function buildPlanting(root, venues) {
+  const bed = new THREE.Shape();
+  for (let i = 0; i <= 64; i++) {
+    const a = i / 64 * TAU, r = 1 + .055 * Math.cos(3 * a);
+    const x = -66 + 34 * Math.cos(a) * r, y = -(68.5 + 11 * Math.sin(a) * r);
+    if (i) bed.lineTo(x, y); else bed.moveTo(x, y);
+  }
+  const garden = new THREE.Mesh(new THREE.ShapeGeometry(bed).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: 0x77936a, roughness: 1 }));
+  garden.position.y = .055;
+  garden.receiveShadow = true;
+  root.add(garden);
+  const sites = plantingSites(venues);
+  const leaves = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .91, side: THREE.DoubleSide });
+  const transform = new THREE.Object3D();
+  for (const [kind, geometry] of [['palm', palmGeometry()], ['banyan', clusterGeometry(false)], ['flowers', clusterGeometry(true)]]) {
+    const plants = sites.filter(s => s.kind === kind);
+    const batch = new THREE.InstancedMesh(geometry, leaves, plants.length);
+    batch.name = kind;
+    for (const [i, p] of plants.entries()) {
+      transform.position.set(p.x, .04, p.z);
+      transform.rotation.y = p.yaw;
+      transform.scale.setScalar(p.scale);
+      transform.updateMatrix();
+      batch.setMatrixAt(i, transform.matrix);
+      batch.setColorAt(i, new THREE.Color().setScalar(.87 + .13 * Math.sin(i * 2.23) ** 2));
+    }
+    batch.castShadow = batch.receiveShadow = true;
+    root.add(batch);
+  }
 }
 
 function buildParkGLBPlacements(venueMap) {
   const ave = venueMap.totem_ave.box;
   const gateCenter = uvToXZ(418, 517);
   const galleryCenter = uvToXZ(212, 392);
-  const vol = EXTRA_STRUCTURES.find((e) => e.id === 'volcano_rockery');
   const woodArch = EXTRA_STRUCTURES.find((e) => e.id === 'yazhou_wood_arch');
+  const avenueYaw = avenueHeading(ave);
 
   const items = [
     // 入口牌坊、南海女神门头+互动游乐馆综合体
     { model: '01_gate_paifang', cx: gateCenter.x, cz: gateCenter.z, wx: 56, dz: 14, h: 22, rotY: 0 },
-    { model: '03_goddess_hall', cx: 71.5, cz: 27.5, wx: 106, dz: 88, h: 35, rotY: 0 },
+    { model: '03_goddess_hall', cx: 58, cz: 38, wx: 106, dz: 88, h: 35, rotY: avenueYaw },
 
     // 核心剧院群与商业前廊
     { model: '04_theater_1', cx: -156.0, cz: 98.0, wx: 64, dz: 104, h: 28, rotY: Math.PI * 0.5 },
     { model: '05_theater_2', cx: venueMap.theater_2.box.cx, cz: venueMap.theater_2.box.cz, wx: 54, dz: 65, h: 26, rotY: 0 },
     { model: '17_front_gallery', cx: galleryCenter.x, cz: galleryCenter.z, wx: 126, dz: 76, h: 12, rotY: 0 },
-    { model: '15_virtual_sand_hall', cx: venueMap.phantom_space.box.cx, cz: venueMap.phantom_space.box.cz, wx: 26, dz: 20, h: 16, rotY: 0 },
+    { model: '15_virtual_sand_hall', cx: -152, cz: 26, wx: 23, dz: 18, h: 16, rotY: 0 },
 
     // 火焰山、喊泉古亭、丹霞柱廊、风情街城堡
-    { model: '06_volcano_mountain', cx: vol.pos.x, cz: vol.pos.z, wx: 34, dz: 36, h: 25, rotY: -Math.PI * 0.5 },
-    { model: '07_shouting_fountain', cx: venueMap.shouting_fountain.box.cx, cz: venueMap.shouting_fountain.box.cz, wx: 24, dz: 35, h: 16, rotY: 0 },
-    { model: '08_danxia_colonnade', cx: -108.0, cz: -30.0, wx: 88, dz: 148, h: 28, rotY: 0 },
-    { model: '09_exotic_castle', cx: venueMap.exotic_street.box.cx, cz: venueMap.exotic_street.box.cz, wx: 21, dz: 70, h: 18, rotY: Math.PI * 0.5 },
+    // These three neighbors leave the entire 34 m ceremonial stone disc clear.
+    { model: '06_volcano_mountain', cx: -66, cz: 1.5, wx: 16.8, dz: 19, h: 20, rotY: -Math.PI * 0.5 },
+    { model: '07_shouting_fountain', cx: venueMap.shouting_fountain.box.cx + 1.1, cz: venueMap.shouting_fountain.box.cz, wx: 20.9, dz: 35, h: 16, rotY: 0 },
+    { model: '08_danxia_colonnade', cx: -144.0, cz: -62.0, wx: 34.0, dz: 110.0, h: 25.0, rotY: 0.18 },
+    { model: '09_exotic_castle', cx: -80.0, cz: -38.0, wx: 28.0, dz: 52.0, h: 17.5, rotY: 0 },
 
     // 美食广场、绣楼、黎村、苗寨、虚拟空间、精灵谷、鹦歌燕舞、天涯鬼域
     { model: '10_food_courtyard', cx: venueMap.food_plaza.box.cx, cz: venueMap.food_plaza.box.cz, wx: 56, dz: 64, h: 15, rotY: 0 },
@@ -255,8 +540,8 @@ function buildParkGLBPlacements(venueMap) {
       const localX = side * (ave.wx * 0.5 + 2.4);
       items.push({
         model: '02_totem_pillar',
-        cx: ave.cx + localX,
-        cz: ave.cz + localZ,
+        cx: ave.cx + Math.cos(avenueYaw) * localX + Math.sin(avenueYaw) * localZ,
+        cz: ave.cz - Math.sin(avenueYaw) * localX + Math.cos(avenueYaw) * localZ,
         wx: 3.4,
         dz: 3.4,
         h: 15.0,
@@ -267,77 +552,79 @@ function buildParkGLBPlacements(venueMap) {
   return items;
 }
 
-async function loadAllParkGLBs(parentGroup, venueMap, maxAniso = 8) {
-  const loader = new GLTFLoader();
-  const placements = buildParkGLBPlacements(venueMap);
-  const uniqueModels = [...new Set(placements.map((p) => p.model))];
-  const cache = new Map();
-  const loaderEl = document.getElementById('modelLoader');
-
-  let done = 0;
-  await Promise.all(
-    uniqueModels.map(async (name) => {
-      const gltf = await loader.loadAsync(`./models/${name}.glb`);
-      const root = gltf.scene;
-      root.traverse((ch) => {
-        if (ch.isMesh) {
-          ch.castShadow = true;
-          ch.receiveShadow = true;
-          if (ch.material && ch.material.map) {
-            ch.material.map.anisotropy = maxAniso;
-            ch.material.map.needsUpdate = true;
-          }
-        }
-      });
-      const box = new THREE.Box3().setFromObject(root);
-      const size = new THREE.Vector3();
-      box.getSize(size);
-      cache.set(name, { root, size, minY: box.min.y });
-      done += 1;
-      if (loaderEl) loaderEl.textContent = `正在加载 1:1 实景3D模型 (${done}/${uniqueModels.length})...`;
-    })
-  );
-
-  for (const p of placements) {
-    const entry = cache.get(p.model);
-    if (!entry) continue;
-    const inst = entry.root.clone(true);
-    const swapped = Math.abs(Math.sin(p.rotY)) > 0.7;
-    const targetLocalX = swapped ? p.dz : p.wx;
-    const targetLocalZ = swapped ? p.wx : p.dz;
-    const sx = targetLocalX / Math.max(entry.size.x, 0.01);
-    const sy = p.h / Math.max(entry.size.y, 0.01);
-    const sz = targetLocalZ / Math.max(entry.size.z, 0.01);
-    inst.scale.set(sx, sy, sz);
-    inst.rotation.y = p.rotY;
-    inst.position.set(p.cx, -entry.minY * sy + 0.15, p.cz);
-    parentGroup.add(inst);
+function placeModel(entry, plan) {
+  const centered = entry.root.clone(true);
+  centered.position.sub(new THREE.Vector3(entry.center.x, entry.minY, entry.center.z));
+  const placed = new THREE.Group();
+  placed.name = plan.model;
+  placed.add(centered);
+  const swapped = Math.abs(Math.sin(plan.rotY)) > .7;
+  placed.scale.set((swapped ? plan.dz : plan.wx) / entry.size.x, plan.h / entry.size.y,
+    (swapped ? plan.wx : plan.dz) / entry.size.z);
+  placed.rotation.y = plan.rotY;
+  if (plan.model === '08_danxia_colonnade') {
+    // The cliff is L-shaped. Fit its rotated vertices, not empty corners of its local box.
+    const bounds = new THREE.Box3(), size = new THREE.Vector3();
+    for (let pass = 0; pass < 12; pass++) {
+      bounds.setFromObject(placed, true).getSize(size);
+      if (Math.abs(size.x - plan.wx) + Math.abs(size.z - plan.dz) < .001) break;
+      placed.scale.x *= plan.wx / size.x;
+      placed.scale.z *= plan.dz / size.z;
+    }
+    const center = bounds.setFromObject(placed, true).getCenter(new THREE.Vector3());
+    placed.position.set(plan.cx - center.x, -bounds.min.y, plan.cz - center.z);
+  } else {
+    placed.position.set(plan.cx, 0, plan.cz);
   }
+  return placed;
+}
 
+async function loadAllParkGLBs(parentGroup, placements, maxAniso) {
+  const loader = new GLTFLoader();
+  const names = [...new Set(placements.map(p => p.model))];
+  const loaderEl = document.getElementById('modelLoader');
+  let done = 0;
+  await Promise.all(names.map(async name => {
+    const { scene: root } = await loader.loadAsync('./models/' + name + '.glb');
+    root.traverse(ch => {
+      if (!ch.isMesh) return;
+      ch.castShadow = ch.receiveShadow = true;
+      if (ch.material.map) ch.material.map.anisotropy = maxAniso;
+    });
+    const box = new THREE.Box3().setFromObject(root, true);
+    const entry = { root, size: box.getSize(new THREE.Vector3()), center: box.getCenter(new THREE.Vector3()), minY: box.min.y };
+    for (const plan of placements.filter(p => p.model === name)) parentGroup.add(placeModel(entry, plan));
+    done++;
+    if (loaderEl) loaderEl.textContent = '实景模型加载中 ' + done + ' / ' + names.length;
+  }));
   if (loaderEl) {
-    loaderEl.textContent = '1:1 实景3D模型加载完成';
-    setTimeout(() => loaderEl.classList.add('done'), 500);
+    loaderEl.textContent = '实景模型已就绪';
+    setTimeout(() => loaderEl.classList.add('done'), 300);
   }
 }
 
 export function createParkScene3D(container, onFrameLabels) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xdbe9dc);
-  scene.fog = new THREE.FogExp2(0xdbe9dc, 0.00095);
+  scene.background = new THREE.Color(0xdceaf0);
+  scene.fog = new THREE.FogExp2(0xdceaf0, 0.00088);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 820 ? 1.5 : 2));
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.18;
+  renderer.toneMappingExposure = 1.03;
   container.appendChild(renderer.domElement);
 
   const theta = (MAP_CALIBRATION.thetaDeg * Math.PI) / 180;
   const phi = (MAP_CALIBRATION.phiDeg * Math.PI) / 180;
   const isoDir = new THREE.Vector3(Math.sin(theta) * Math.cos(phi), Math.sin(phi), Math.cos(theta) * Math.cos(phi));
+  const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
+  const up = new THREE.Vector3().crossVectors(isoDir, right);
 
   const perspCam = new THREE.PerspectiveCamera(34, container.clientWidth / container.clientHeight, 2, 2400);
   perspCam.position.copy(isoDir.clone().multiplyScalar(510));
@@ -350,10 +637,14 @@ export function createParkScene3D(container, onFrameLabels) {
   const controls = new OrbitControls(perspCam, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.07;
-  controls.maxPolarAngle = Math.PI * 0.455;
-  controls.minPolarAngle = Math.PI * 0.12;
-  controls.minDistance = 85;
-  controls.maxDistance = 780;
+  controls.enableRotate = false;
+  controls.screenSpacePanning = false;
+  controls.minPolarAngle = controls.maxPolarAngle = Math.PI / 2 - phi;
+  controls.minAzimuthAngle = controls.maxAzimuthAngle = theta;
+  controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
+  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  controls.minDistance = 115;
+  controls.maxDistance = 640;
   controls.target.set(-8, 0, -18);
   controls.update();
 
@@ -387,20 +678,23 @@ export function createParkScene3D(container, onFrameLabels) {
 
   const venueMap = Object.fromEntries(PARK_VENUES.map((v) => [v.id, v]));
   const animHooks = [];
-  const stateRef = { fountainBoost: 0 };
+  const stateRef = { fountainBoostUntil: 0 };
   const texs = createGroundTextures();
 
   scene.add(buildParkGroundAndPools(venueMap, texs, animHooks, stateRef));
 
   const glbRootGroup = new THREE.Group();
   scene.add(glbRootGroup);
-  loadAllParkGLBs(glbRootGroup, venueMap, renderer.capabilities.getMaxAnisotropy()).catch((err) => {
+  const placements = buildParkGLBPlacements(venueMap);
+  loadAllParkGLBs(glbRootGroup, placements, Math.min(8, renderer.capabilities.getMaxAnisotropy())).catch((err) => {
+    const loaderEl = document.getElementById('modelLoader');
+    if (loaderEl) loaderEl.textContent = '部分实景模型加载失败，请刷新重试';
     console.error('GLB load error:', err);
-  });
+  }).finally(() => { renderer.shadowMap.needsUpdate = true; });
 
   const selectRing = new THREE.Mesh(
-    new THREE.RingGeometry(11, 14.5, 32),
-    new THREE.MeshBasicMaterial({ color: 0xff5722, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+    new THREE.RingGeometry(10.5, 11.3, 64),
+    new THREE.MeshBasicMaterial({ color: 0xc6954b, side: THREE.DoubleSide, transparent: true, opacity: .86 })
   );
   selectRing.rotation.x = -Math.PI * 0.5;
   selectRing.position.y = 0.52;
@@ -411,59 +705,103 @@ export function createParkScene3D(container, onFrameLabels) {
   scene.add(routeGroup);
 
   function clearRoute() {
-    while (routeGroup.children.length) {
-      const ch = routeGroup.children.pop();
-      if (ch.geometry) ch.geometry.dispose();
+    for (const mesh of [...routeGroup.children]) {
+      mesh.geometry.dispose();
+      mesh.material.dispose();
     }
+    routeGroup.clear();
   }
 
-  function showRoute(points3D, color = 0x00e5ff) {
+  function showRoute(points, color = 0xb8292f) {
     clearRoute();
-    if (!points3D || points3D.length < 2) return;
-    const vecs = points3D.map((p) => new THREE.Vector3(p.x, 1.05, p.z));
-    const curve = new THREE.CatmullRomCurve3(vecs, false, 'catmullrom', 0.18);
-    const tube = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, Math.max(24, vecs.length * 10), 1.45, 8, false),
-      new THREE.MeshBasicMaterial({ color })
-    );
-    routeGroup.add(tube);
-
-    for (const [pt, c] of [[vecs[0], 0x22c55e], [vecs[vecs.length - 1], 0xef4444]]) {
-      const marker = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 2.8, 1.5, 16), new THREE.MeshBasicMaterial({ color: c }));
-      marker.position.copy(pt);
-      routeGroup.add(marker);
+    if (!points?.length) return;
+    const bands = [], gilding = [];
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1], b = points[i];
+      const dx = b.x - a.x, dz = b.z - a.z, length = Math.hypot(dx, dz);
+      const yaw = -Math.atan2(dz, dx), x = (a.x + b.x) / 2, z = (a.z + b.z) / 2;
+      gilding.push(floorPatch(length, 2.05, x, z, .55, yaw));
+      bands.push(floorPatch(length, 1.38, x, z, .58, yaw));
+    }
+    for (const { x, z } of points) {
+      gilding.push(floorDisc(1.025, x, z, .55, 16));
+      bands.push(floorDisc(.69, x, z, .58, 16));
+    }
+    batchedFloor(routeGroup, gilding, new THREE.MeshBasicMaterial({ color: 0xe0c998 }));
+    batchedFloor(routeGroup, bands, new THREE.MeshBasicMaterial({ color }));
+    for (const [point, tint] of [[points[0], 0x397459], [points[points.length - 1], color]]) {
+      const stop = new THREE.Mesh(floorDisc(1.75, point.x, point.z, .62),
+        new THREE.MeshBasicMaterial({ color: tint }));
+      routeGroup.add(stop);
     }
   }
 
-  let flyAnim = null;
+  const clock = new THREE.Clock();
+  let flyAnim = null, framedPoints = null;
+  function flyTo(target, distance, instant = false) {
+    activeCam = perspCam;
+    controls.enabled = true;
+    target.set(THREE.MathUtils.clamp(target.x, -230, 230), 0, THREE.MathUtils.clamp(target.z, -230, 210));
+    const range = THREE.MathUtils.clamp(distance, controls.minDistance, controls.maxDistance);
+    // Consume any remaining drag inertia before a programmatic camera move.
+    controls.enableDamping = false;
+    controls.update();
+    controls.enableDamping = true;
+    if (instant) {
+      controls.target.copy(target);
+      perspCam.position.copy(target).addScaledVector(isoDir, range);
+      controls.update();
+      flyAnim = null;
+      return;
+    }
+    flyAnim = { start: performance.now(), from: controls.target.clone(), to: target,
+      fromRange: perspCam.position.distanceTo(controls.target), toRange: range };
+  }
+  controls.addEventListener('start', () => { flyAnim = null; framedPoints = null; });
+
   function focusPoint(x, z, dist = 210) {
-    activeCam = perspCam;
-    controls.enabled = true;
+    framedPoints = null;
     selectRing.visible = true;
-    selectRing.position.set(x, 0.52, z);
-    if (Math.hypot(x - venueMap.shouting_fountain.pos.x, z - venueMap.shouting_fountain.pos.z) < 8) {
-      stateRef.fountainBoost = 4.0;
-    }
-    const isPortrait = container.clientHeight > container.clientWidth;
-    const actualDist = isPortrait ? Math.max(dist * 1.62, 335) : dist;
-    const endTarget = new THREE.Vector3(x, 0, z);
-    const endPos = endTarget.clone().add(isoDir.clone().multiplyScalar(actualDist));
-    flyAnim = { t: 0, startPos: perspCam.position.clone(), startTarget: controls.target.clone(), endPos, endTarget };
+    selectRing.position.set(x, .52, z);
+    if (Math.hypot(x - venueMap.shouting_fountain.pos.x, z - venueMap.shouting_fountain.pos.z) < 8)
+      stateRef.fountainBoostUntil = clock.getElapsedTime() + 4;
+    flyTo(new THREE.Vector3(x, 0, z), dist);
   }
 
+  function fitView(points, instant = false) {
+    if (!points.length) return;
+    const corners = points.map(p => new THREE.Vector3(p.x, p.y ?? 0, p.z));
+    const frame = new THREE.Box2();
+    for (const p of corners) frame.expandByPoint(new THREE.Vector2(p.dot(right), p.dot(up)));
+    const center = frame.getCenter(new THREE.Vector2());
+    const target = right.clone().multiplyScalar(center.x);
+    target.x -= Math.sin(theta) * center.y / Math.sin(phi);
+    target.z -= Math.cos(theta) * center.y / Math.sin(phi);
+    target.x = THREE.MathUtils.clamp(target.x, -230, 230);
+    target.z = THREE.MathUtils.clamp(target.z, -230, 210);
+    const tanV = Math.tan(THREE.MathUtils.degToRad(perspCam.fov / 2)), tanH = tanV * perspCam.aspect;
+    const usableX = Math.max(.6, 1 - 70 / container.clientWidth);
+    const usableY = Math.max(.56, 1 - 145 / container.clientHeight);
+    let distance = controls.minDistance;
+    for (const p of corners) {
+      const delta = p.sub(target), near = delta.dot(isoDir);
+      distance = Math.max(distance, near + Math.abs(delta.dot(right)) / (tanH * usableX),
+        near + Math.abs(delta.dot(up)) / (tanV * usableY));
+    }
+    flyTo(target, distance, instant);
+  }
+
+  const overviewPoints = placements.flatMap(p => [-1, 1].flatMap(sx => [-1, 1].map(sz =>
+    ({ x: p.cx + sx * p.wx / 2, y: 0, z: p.cz + sz * p.dz / 2 }))).concat({ x: p.cx, y: p.h, z: p.cz }));
   function resetOverview() {
-    activeCam = perspCam;
-    controls.enabled = true;
     selectRing.visible = false;
-    const endTarget = new THREE.Vector3(-8, 0, -18);
-    const dist = container.clientHeight > container.clientWidth ? 610 : 485;
-    flyAnim = {
-      t: 0,
-      startPos: perspCam.position.clone(),
-      startTarget: controls.target.clone(),
-      endPos: endTarget.clone().add(isoDir.clone().multiplyScalar(dist)),
-      endTarget,
-    };
+    framedPoints = overviewPoints;
+    fitView(overviewPoints);
+  }
+  function focusPoints(points) {
+    selectRing.visible = false;
+    framedPoints = points;
+    fitView(points);
   }
 
   function updateOrthoFrustum() {
@@ -486,7 +824,6 @@ export function createParkScene3D(container, onFrameLabels) {
   }
 
   function setOrthoCompare(enabled) {
-    handleResize();
     if (enabled) {
       flyAnim = null;
       orthoCam.position.copy(isoDir.clone().multiplyScalar(800));
@@ -497,11 +834,12 @@ export function createParkScene3D(container, onFrameLabels) {
       activeCam = perspCam;
       controls.enabled = true;
     }
+    handleResize();
   }
 
   function setNightMode(isNight) {
-    scene.background.setHex(isNight ? 0x10192b : 0xdbe9dc);
-    scene.fog.color.setHex(isNight ? 0x10192b : 0xdbe9dc);
+    scene.background.setHex(isNight ? 0x0d1524 : 0xdceaf0);
+    scene.fog.color.setHex(isNight ? 0x0d1524 : 0xdceaf0);
     ambientLight.intensity = isNight ? 0.35 : 0.85;
     hemiLight.intensity = isNight ? 0.32 : 1.05;
     sunLight.intensity = isNight ? 0.28 : 1.65;
@@ -514,26 +852,37 @@ export function createParkScene3D(container, onFrameLabels) {
     const h = container.clientHeight;
     if (!w || !h) return;
     perspCam.aspect = w / h;
+    // Limit wide-angle distortion when framing the park in portrait.
+    const tanV = Math.max(Math.tan(THREE.MathUtils.degToRad(17)), .53 / perspCam.aspect);
+    perspCam.fov = Math.min(58, THREE.MathUtils.radToDeg(2 * Math.atan(tanV)));
     perspCam.updateProjectionMatrix();
     updateOrthoFrustum();
     renderer.setSize(w, h);
+    if (activeCam === perspCam && framedPoints) fitView(framedPoints, true);
   }
   window.addEventListener('resize', handleResize);
-  resetOverview();
+  framedPoints = overviewPoints;
+  handleResize();
 
   const projVec = new THREE.Vector3();
-  const clock = new THREE.Clock();
   function animate() {
     requestAnimationFrame(animate);
     const elapsed = clock.getElapsedTime();
     if (flyAnim) {
-      flyAnim.t = Math.min(1, flyAnim.t + 0.045);
-      const k = 1 - Math.pow(1 - flyAnim.t, 3);
-      perspCam.position.lerpVectors(flyAnim.startPos, flyAnim.endPos, k);
-      controls.target.lerpVectors(flyAnim.startTarget, flyAnim.endTarget, k);
-      if (flyAnim.t >= 1) flyAnim = null;
+      const t = Math.min(1, (performance.now() - flyAnim.start) / 540);
+      const eased = 1 - Math.pow(1 - t, 3);
+      controls.target.lerpVectors(flyAnim.from, flyAnim.to, eased);
+      perspCam.position.copy(controls.target).addScaledVector(isoDir, THREE.MathUtils.lerp(flyAnim.fromRange, flyAnim.toRange, eased));
+      if (t === 1) flyAnim = null;
     }
-    if (controls.enabled) controls.update();
+    if (controls.enabled) {
+      controls.update();
+      const distance = perspCam.position.distanceTo(controls.target);
+      controls.target.x = THREE.MathUtils.clamp(controls.target.x, -230, 230);
+      controls.target.y = 0;
+      controls.target.z = THREE.MathUtils.clamp(controls.target.z, -230, 210);
+      perspCam.position.copy(controls.target).addScaledVector(isoDir, distance);
+    }
     if (selectRing.visible) {
       const s = 1 + Math.sin(elapsed * 4.5) * 0.1;
       selectRing.scale.set(s, s, 1);
@@ -546,7 +895,8 @@ export function createParkScene3D(container, onFrameLabels) {
       const h = container.clientHeight;
       onFrameLabels((x, y, z) => {
         projVec.set(x, y, z).project(activeCam);
-        return { x: (projVec.x * 0.5 + 0.5) * w, y: (-projVec.y * 0.5 + 0.5) * h, visible: projVec.z >= -1 && projVec.z <= 1 };
+        return { x: (projVec.x * .5 + .5) * w, y: (-projVec.y * .5 + .5) * h,
+          visible: Math.abs(projVec.x) <= 1 && Math.abs(projVec.y) <= 1 && Math.abs(projVec.z) <= 1 };
       });
     }
   }
@@ -554,9 +904,11 @@ export function createParkScene3D(container, onFrameLabels) {
 
   return {
     focusPoint,
+    focusPoints,
+    clearSelection: () => { selectRing.visible = false; },
     resetOverview,
     showRoute,
-    showParadeRoute: () => showRoute(PARADE_ROUTE_NODES.map((id) => ROAD_NODES[id].pos), 0xf59e0b),
+    showParadeRoute: () => showRoute(PARADE_ROUTE_NODES.map((id) => ROAD_NODES[id].pos), 0xc6954b),
     clearRoute,
     setOrthoCompare,
     setNightMode,

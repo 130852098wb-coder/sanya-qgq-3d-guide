@@ -68,7 +68,7 @@ export const PARK_ZONES = [
   { id: 'adventure', name: '奇幻游乐区', color: '#6B46C1' },
 ];
 
-// 导游图全部27处标注点位（badgeType严格对应原图红底/蓝底标牌与入口标识）
+// 导游图标注点位及可单独导航的南海女神门头。
 export const PARK_VENUES = [
   {
     id: 'entrance',
@@ -91,6 +91,17 @@ export const PARK_VENUES = [
     roadNode: 'n_totem_mid',
     footprint: [432, 488, 506, 430, 476, 514, 1.2],
     summary: '两侧矗立8根黎苗文化彩绘神柱的迎宾礼仪石阶大道，连接牌坊与南海女神造像门头。',
+  },
+  {
+    id: 'goddess_portal',
+    name: '南海女神门头',
+    zone: 'entrance',
+    badgeType: 'gate',
+    uv: [522, 418],
+    pinHeight: 24,
+    roadNode: 'n_portal_hall',
+    footprint: null,
+    summary: '沿图腾大道抵达的检票门头，可在此欣赏南海女神造像与白象群雕。',
   },
   {
     id: 'gift_shop',
@@ -429,7 +440,7 @@ export const ROAD_NODES = {
   n_portal_hall: { uv: [522, 418], name: '门头检票口' },
   n_love_plaza: { uv: [472, 344], name: '爱情广场' },
   n_gift_front: { uv: [348, 348], name: '礼品店前步道' },
-  n_fountain_front: { uv: [342, 314], name: '喊泉前广场' },
+  n_fountain_front: { uv: [428, 322], name: '喊泉池东南侧步道' },
   n_theater2_gate: { uv: [192, 348], name: '2号剧院门前庭院' },
   n_romance_plaza: { uv: [338, 246], name: '千古情广场中心' },
   n_theater1_east: { uv: [256, 238], name: '1号剧院与幻影空间门前' },
@@ -459,9 +470,8 @@ export const ROAD_EDGES = [
   ['n_portal_hall', 'n_love_plaza'],
   ['n_love_plaza', 'n_gift_front'],
   ['n_love_plaza', 'n_fountain_front'],
-  ['n_gift_front', 'n_fountain_front'],
+  ['n_fountain_front', 'n_love_st_sw'],
   ['n_gift_front', 'n_theater2_gate'],
-  ['n_fountain_front', 'n_romance_plaza'],
   ['n_theater2_gate', 'n_theater1_east'],
   ['n_romance_plaza', 'n_theater1_east'],
   ['n_theater1_east', 'n_battle_entry'],
@@ -652,20 +662,8 @@ export function findWalkingRoute(fromId, toId) {
   const nodeIds = [];
   for (let at = goal; at; at = prevMap[at]) nodeIds.unshift(at);
 
-  const points3D = nodeIds.map((nid) => ({ x: ROAD_NODES[nid].pos.x, y: 0.35, z: ROAD_NODES[nid].pos.z }));
-  if (VENUE_BY_ID[fromId]) {
-    const p0 = VENUE_BY_ID[fromId].pos;
-    if (Math.hypot(p0.x - points3D[0].x, p0.z - points3D[0].z) > 1.0) {
-      points3D.unshift({ x: p0.x, y: 0.35, z: p0.z });
-    }
-  }
-  if (VENUE_BY_ID[toId]) {
-    const p1 = VENUE_BY_ID[toId].pos;
-    const last = points3D[points3D.length - 1];
-    if (Math.hypot(p1.x - last.x, p1.z - last.z) > 1.0) {
-      points3D.push({ x: p1.x, y: 0.35, z: p1.z });
-    }
-  }
+  // 标牌位于建筑或水面上方，步行线应止在对应的可通行入口。
+  const points3D = nodeIds.map((nid) => ({ ...ROAD_NODES[nid].pos, y: 0.35 }));
 
   const distanceMeters = Math.round(distMap[goal]);
   return {
@@ -685,7 +683,7 @@ export function getShowStatus(timeRange, nowMinutes) {
   const [startStr, endStr] = timeRange.split('-');
   const start = parseTimeToMinutes(startStr);
   const end = parseTimeToMinutes(endStr);
-  if (nowMinutes >= start && nowMinutes <= end) return { code: 'live', label: '正在演出', remainMin: end - nowMinutes };
+  if (nowMinutes >= start && nowMinutes < end) return { code: 'live', label: '正在演出', remainMin: end - nowMinutes };
   if (nowMinutes < start && start - nowMinutes <= 30) return { code: 'soon', label: `${start - nowMinutes}分钟后开演`, remainMin: start - nowMinutes };
   if (nowMinutes < start) return { code: 'upcoming', label: '待开演', remainMin: start - nowMinutes };
   return { code: 'ended', label: '已结束', remainMin: 0 };
