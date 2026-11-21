@@ -5,6 +5,7 @@ import { GLTFLoader } from './lib/GLTFLoader.js';
 import { mergeGeometries } from './lib/BufferGeometryUtils.js';
 import {
   MAP_CALIBRATION,
+  PARK_GEO_ANCHOR,
   PARK_VENUES,
   EXTRA_STRUCTURES,
   ROAD_NODES,
@@ -603,7 +604,57 @@ async function loadAllParkGLBs(parentGroup, placements, maxAniso) {
   }
 }
 
-export function createParkScene3D(container, onFrameLabels) {
+function createGroundArtwork() {
+  const { imageWidth, imageHeight } = MAP_CALIBRATION;
+  const geometry = new THREE.PlaneGeometry(1, 1);
+  const uv = geometry.getAttribute('uv'), positions = geometry.getAttribute('position');
+  for (let i = 0; i < uv.count; i++) {
+    const { x, z } = uvToXZ(uv.getX(i) * imageWidth, (1 - uv.getY(i)) * imageHeight);
+    positions.setXYZ(i, x, .08, z);
+  }
+  geometry.computeVertexNormals();
+  const material = new THREE.MeshBasicMaterial({ transparent: true, opacity: .55, depthWrite: false, toneMapped: false });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = '手绘导览底图';
+  mesh.visible = false;
+  mesh.renderOrder = -1;
+  return mesh;
+}
+
+function createLocationMarker() {
+  const group = new THREE.Group();
+  group.name = '我的位置';
+  group.visible = false;
+  // GPS 点可能位于门楼或树冠下，保持标记可读，地理位置仍落在原始坐标。
+  function layer(geometry, options, order) {
+    const material = new THREE.MeshBasicMaterial({ ...options, transparent: true, depthTest: false,
+      depthWrite: false, toneMapped: false, fog: false });
+    const mesh = new THREE.Mesh(geometry.rotateX(-Math.PI / 2), material);
+    mesh.renderOrder = order;
+    group.add(mesh);
+    return mesh;
+  }
+  const fanTexture = makeCanvasTexture(128, 128, (ctx, w, h) => {
+    ctx.translate(w / 2, h / 2);
+    const radius = w * .49, gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+    gradient.addColorStop(0, 'rgba(30,136,229,.80)');
+    gradient.addColorStop(.55, 'rgba(55,165,255,.48)');
+    gradient.addColorStop(1, 'rgba(55,165,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, radius, -Math.PI / 2 - .58, -Math.PI / 2 + .58);
+    ctx.fill();
+  });
+  const fan = layer(new THREE.PlaneGeometry(34, 34), { map: fanTexture }, 10);
+  const pulse = layer(new THREE.RingGeometry(3.5, 4.2, 48), { color: 0x59b7ff }, 11);
+  layer(new THREE.CircleGeometry(3.7, 48), { color: 0x91d2ff, opacity: .38 }, 12);
+  layer(new THREE.CircleGeometry(3, 48), { color: 0xffffff }, 13);
+  layer(new THREE.CircleGeometry(2.15, 48), { color: 0x1e88e5 }, 14);
+  return { group, fan, pulse };
+}
+
+export function createParkScene3D(container, onFrameLabels, onHeadingChange) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xdceaf0);
   scene.fog = new THREE.FogExp2(0xdceaf0, 0.00088);
@@ -622,12 +673,11 @@ export function createParkScene3D(container, onFrameLabels) {
 
   const theta = (MAP_CALIBRATION.thetaDeg * Math.PI) / 180;
   const phi = (MAP_CALIBRATION.phiDeg * Math.PI) / 180;
-  const isoDir = new THREE.Vector3(Math.sin(theta) * Math.cos(phi), Math.sin(phi), Math.cos(theta) * Math.cos(phi));
-  const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
-  const up = new THREE.Vector3().crossVectors(isoDir, right);
+  const LOCKED_POLAR = Math.PI / 2 - phi;
+  const isoDir = new THREE.Vector3().setFromSphericalCoords(1, LOCKED_POLAR, theta);
 
   const perspCam = new THREE.PerspectiveCamera(34, container.clientWidth / container.clientHeight, 2, 2400);
-  perspCam.position.copy(isoDir.clone().multiplyScalar(510));
+  perspCam.position.copy(isoDir).multiplyScalar(510);
 
   const orthoCam = new THREE.OrthographicCamera(-267.5, 267.5, 150, -150, 1, 2400);
   orthoCam.position.copy(isoDir.clone().multiplyScalar(800));
@@ -637,15 +687,16 @@ export function createParkScene3D(container, onFrameLabels) {
   const controls = new OrbitControls(perspCam, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.07;
-  controls.enableRotate = false;
+  controls.enableRotate = true;
   controls.screenSpacePanning = false;
-  controls.minPolarAngle = controls.maxPolarAngle = Math.PI / 2 - phi;
-  controls.minAzimuthAngle = controls.maxAzimuthAngle = theta;
+  controls.minPolarAngle = LOCKED_POLAR;
+  controls.maxPolarAngle = LOCKED_POLAR;
   controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
-  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
   controls.minDistance = 115;
   controls.maxDistance = 640;
   controls.target.set(-8, 0, -18);
+  perspCam.position.copy(controls.target).addScaledVector(isoDir, 510);
   controls.update();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
@@ -682,6 +733,45 @@ export function createParkScene3D(container, onFrameLabels) {
   const texs = createGroundTextures();
 
   scene.add(buildParkGroundAndPools(venueMap, texs, animHooks, stateRef));
+  const artwork = createGroundArtwork();
+  const locationMarker = createLocationMarker();
+  scene.add(artwork, locationMarker.group);
+  let artworkEnabled = false, artworkReady = false;
+
+  function setGroundOverlay(enabled, opacity = .55) {
+    const material = artwork.material;
+    artworkEnabled = enabled;
+    material.opacity = THREE.MathUtils.clamp(opacity, 0, 1);
+    if (enabled && !material.map) {
+      // 保留原图像素标定，仅在贴地层淡出纸边、印刷标题与图例框。
+      material.alphaMap = makeCanvasTexture(MAP_CALIBRATION.imageWidth, MAP_CALIBRATION.imageHeight, (ctx, w, h) => {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+        for (const [x, y, dx, dy] of [[0,0,20,0],[w,0,-20,0],[0,0,0,18],[0,h,0,-18]]) {
+          const fade = ctx.createLinearGradient(x, y, x + dx, y + dy);
+          fade.addColorStop(0, '#000');
+          fade.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = fade;
+          ctx.fillRect(0, 0, w, h);
+        }
+        ctx.shadowBlur = 9;
+        ctx.shadowColor = ctx.fillStyle = '#000';
+        ctx.fillRect(38, 42, 360, 44);
+        ctx.fillRect(95, 96, 130, 38);
+        ctx.fillRect(915, 338, 99, 235);
+      });
+      material.alphaMap.colorSpace = THREE.NoColorSpace;
+      const texture = new THREE.TextureLoader().load(MAP_CALIBRATION.referenceImage, () => {
+        artworkReady = true;
+        artwork.visible = artworkEnabled && material.opacity > 0;
+      });
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      material.map = texture;
+      material.needsUpdate = true;
+    }
+    artwork.visible = enabled && artworkReady && material.opacity > 0;
+  }
 
   const glbRootGroup = new THREE.Group();
   scene.add(glbRootGroup);
@@ -738,26 +828,129 @@ export function createParkScene3D(container, onFrameLabels) {
 
   const clock = new THREE.Clock();
   let flyAnim = null, framedPoints = null;
-  function flyTo(target, distance, instant = false) {
-    activeCam = perspCam;
-    controls.enabled = true;
-    target.set(THREE.MathUtils.clamp(target.x, -230, 230), 0, THREE.MathUtils.clamp(target.z, -230, 210));
-    const range = THREE.MathUtils.clamp(distance, controls.minDistance, controls.maxDistance);
-    // Consume any remaining drag inertia before a programmatic camera move.
+  let hasUserLocation = false;
+  const offset = new THREE.Vector3();
+  const wrapAngle = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
+  function currentYaw() {
+    return Math.atan2(perspCam.position.x - controls.target.x, perspCam.position.z - controls.target.z);
+  }
+  function getHeadingDeg() {
+    return activeCam === orthoCam ? 0 : THREE.MathUtils.radToDeg(wrapAngle(currentYaw() - theta));
+  }
+  function clampGroundTarget(target) {
+    // 保留 V2 拖动边界，仅在定位点位于图外、650 m 园内时延伸至该点。
+    const x = hasUserLocation ? locationMarker.group.position.x : 0;
+    const z = hasUserLocation ? locationMarker.group.position.z : 0;
+    target.x = THREE.MathUtils.clamp(target.x, Math.min(-230, x), Math.max(230, x));
+    target.z = THREE.MathUtils.clamp(target.z, Math.min(-230, z), Math.max(210, z));
+    target.y = 0;
+  }
+  function discardInertia() {
+    const eye = perspCam.position.clone(), target = controls.target.clone();
     controls.enableDamping = false;
     controls.update();
+    controls.target.copy(target);
+    perspCam.position.copy(eye);
+    controls.update();
     controls.enableDamping = true;
+  }
+  function placeCamera(target, range, yaw) {
+    offset.setFromSphericalCoords(range, LOCKED_POLAR, yaw);
+    perspCam.position.copy(target).add(offset);
+    perspCam.lookAt(target);
+  }
+  function flyTo(target, distance, instant = false, yaw = currentYaw(), duration = 540) {
+    activeCam = perspCam;
+    controls.enabled = true;
+    discardInertia();
+    clampGroundTarget(target);
+    const range = THREE.MathUtils.clamp(distance, controls.minDistance, controls.maxDistance);
     if (instant) {
       controls.target.copy(target);
-      perspCam.position.copy(target).addScaledVector(isoDir, range);
+      placeCamera(target, range, yaw);
       controls.update();
       flyAnim = null;
       return;
     }
-    flyAnim = { start: performance.now(), from: controls.target.clone(), to: target,
+    const fromYaw = currentYaw();
+    flyAnim = { start: performance.now(), duration, fromYaw, turn: wrapAngle(yaw - fromYaw), from: controls.target.clone(), to: target,
       fromRange: perspCam.position.distanceTo(controls.target), toRange: range };
   }
-  controls.addEventListener('start', () => { flyAnim = null; framedPoints = null; });
+  controls.addEventListener('start', () => {
+    flyAnim = null;
+    framedPoints = null;
+    discardInertia();
+  });
+
+  function resetHeading() {
+    framedPoints = null;
+    flyTo(controls.target.clone(), perspCam.position.distanceTo(controls.target), false, theta, 350);
+  }
+
+  // OrbitControls 处理两指间距和中点。这里只消费有方向的夹角差，跨 ±π 时仍是小步旋转。
+  const canvas = renderer.domElement;
+  const twistThreshold = THREE.MathUtils.degToRad(3);
+  let lastAngle = null, accumulated = 0, twisting = false, remainingFinger = null;
+  function pairAngle(touches) {
+    const [a, b] = touches[0].identifier <= touches[1].identifier
+      ? [touches[0], touches[1]] : [touches[1], touches[0]];
+    return Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
+  }
+  function beginTouches(event) {
+    const touches = event.targetTouches;
+    lastAngle = touches.length === 2 ? pairAngle(touches) : null;
+    accumulated = 0;
+    twisting = false;
+    remainingFinger = null;
+  }
+  canvas.addEventListener('touchstart', beginTouches, { passive: true });
+  canvas.addEventListener('touchmove', (event) => {
+    if (!controls.enabled) return;
+    const touches = event.targetTouches;
+    if (touches.length === 2 && lastAngle !== null) {
+      const angle = pairAngle(touches);
+      accumulated += wrapAngle(angle - lastAngle);
+      lastAngle = angle;
+      if (!twisting && Math.abs(accumulated) <= twistThreshold) return;
+      twisting = true;
+      placeCamera(controls.target, perspCam.position.distanceTo(controls.target), currentYaw() + accumulated);
+      accumulated = 0;
+    } else if (touches.length === 1 && remainingFinger) {
+      // 本地版本的 OrbitControls 抬起任一指即退出拖动；另一指可继续在地面上拉动地图。
+      const { clientX, clientY } = touches[0];
+      const dx = clientX - remainingFinger.x, dy = clientY - remainingFinger.y, yaw = currentYaw();
+      const scale = 2 * perspCam.position.distanceTo(controls.target) * Math.tan(THREE.MathUtils.degToRad(perspCam.fov / 2)) / canvas.clientHeight;
+      offset.set(-dx * Math.cos(yaw) - dy * Math.sin(yaw), 0, dx * Math.sin(yaw) - dy * Math.cos(yaw)).multiplyScalar(scale);
+      controls.target.add(offset);
+      perspCam.position.add(offset);
+      remainingFinger.set(clientX, clientY);
+    }
+  }, { passive: true });
+  function endTouches(event) {
+    beginTouches(event);
+    if (event.targetTouches.length === 1) {
+      const touch = event.targetTouches[0];
+      remainingFinger = new THREE.Vector2(touch.clientX, touch.clientY);
+    }
+  }
+  canvas.addEventListener('touchend', endTouches, { passive: true });
+  canvas.addEventListener('touchcancel', endTouches, { passive: true });
+
+  function setUserLocation(x, z, headingDeg = null, visible = true, focus = false) {
+    hasUserLocation = visible;
+    locationMarker.group.visible = visible && activeCam === perspCam;
+    if (!visible) return;
+    locationMarker.group.position.set(x, .72, z);
+    locationMarker.fan.visible = Number.isFinite(headingDeg);
+    if (locationMarker.fan.visible) {
+      locationMarker.fan.rotation.y = THREE.MathUtils.degToRad(PARK_GEO_ANCHOR.headingDeg - headingDeg);
+    }
+    if (focus && activeCam === perspCam) {
+      selectRing.visible = false;
+      framedPoints = null;
+      flyTo(new THREE.Vector3(x, 0, z), 190);
+    }
+  }
 
   function focusPoint(x, z, dist = 210) {
     framedPoints = null;
@@ -768,35 +961,37 @@ export function createParkScene3D(container, onFrameLabels) {
     flyTo(new THREE.Vector3(x, 0, z), dist);
   }
 
-  function fitView(points, instant = false) {
+  function fitView(points, instant = false, yaw = currentYaw()) {
     if (!points.length) return;
+    const dir = new THREE.Vector3().setFromSphericalCoords(1, LOCKED_POLAR, yaw);
+    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const up = new THREE.Vector3().crossVectors(dir, right);
     const corners = points.map(p => new THREE.Vector3(p.x, p.y ?? 0, p.z));
     const frame = new THREE.Box2();
     for (const p of corners) frame.expandByPoint(new THREE.Vector2(p.dot(right), p.dot(up)));
     const center = frame.getCenter(new THREE.Vector2());
     const target = right.clone().multiplyScalar(center.x);
-    target.x -= Math.sin(theta) * center.y / Math.sin(phi);
-    target.z -= Math.cos(theta) * center.y / Math.sin(phi);
-    target.x = THREE.MathUtils.clamp(target.x, -230, 230);
-    target.z = THREE.MathUtils.clamp(target.z, -230, 210);
+    target.x -= Math.sin(yaw) * center.y / Math.sin(phi);
+    target.z -= Math.cos(yaw) * center.y / Math.sin(phi);
+    clampGroundTarget(target);
     const tanV = Math.tan(THREE.MathUtils.degToRad(perspCam.fov / 2)), tanH = tanV * perspCam.aspect;
     const usableX = Math.max(.6, 1 - 70 / container.clientWidth);
     const usableY = Math.max(.56, 1 - 145 / container.clientHeight);
     let distance = controls.minDistance;
     for (const p of corners) {
-      const delta = p.sub(target), near = delta.dot(isoDir);
+      const delta = p.sub(target), near = delta.dot(dir);
       distance = Math.max(distance, near + Math.abs(delta.dot(right)) / (tanH * usableX),
         near + Math.abs(delta.dot(up)) / (tanV * usableY));
     }
-    flyTo(target, distance, instant);
+    flyTo(target, distance, instant, yaw);
   }
 
   const overviewPoints = placements.flatMap(p => [-1, 1].flatMap(sx => [-1, 1].map(sz =>
     ({ x: p.cx + sx * p.wx / 2, y: 0, z: p.cz + sz * p.dz / 2 }))).concat({ x: p.cx, y: p.h, z: p.cz }));
-  function resetOverview() {
+  function resetOverview(restoreHeading = false) {
     selectRing.visible = false;
     framedPoints = overviewPoints;
-    fitView(overviewPoints);
+    fitView(overviewPoints, false, restoreHeading ? theta : currentYaw());
   }
   function focusPoints(points) {
     selectRing.visible = false;
@@ -834,7 +1029,7 @@ export function createParkScene3D(container, onFrameLabels) {
       activeCam = perspCam;
       controls.enabled = true;
     }
-    handleResize();
+    locationMarker.group.visible = hasUserLocation && !enabled;
   }
 
   function setNightMode(isNight) {
@@ -869,19 +1064,23 @@ export function createParkScene3D(container, onFrameLabels) {
     requestAnimationFrame(animate);
     const elapsed = clock.getElapsedTime();
     if (flyAnim) {
-      const t = Math.min(1, (performance.now() - flyAnim.start) / 540);
+      const t = Math.min(1, (performance.now() - flyAnim.start) / flyAnim.duration);
       const eased = 1 - Math.pow(1 - t, 3);
       controls.target.lerpVectors(flyAnim.from, flyAnim.to, eased);
-      perspCam.position.copy(controls.target).addScaledVector(isoDir, THREE.MathUtils.lerp(flyAnim.fromRange, flyAnim.toRange, eased));
+      placeCamera(controls.target, THREE.MathUtils.lerp(flyAnim.fromRange, flyAnim.toRange, eased), flyAnim.fromYaw + flyAnim.turn * eased);
       if (t === 1) flyAnim = null;
     }
     if (controls.enabled) {
       controls.update();
-      const distance = perspCam.position.distanceTo(controls.target);
-      controls.target.x = THREE.MathUtils.clamp(controls.target.x, -230, 230);
-      controls.target.y = 0;
-      controls.target.z = THREE.MathUtils.clamp(controls.target.z, -230, 210);
-      perspCam.position.copy(controls.target).addScaledVector(isoDir, distance);
+      offset.subVectors(perspCam.position, controls.target);
+      clampGroundTarget(controls.target);
+      perspCam.position.copy(controls.target).add(offset);
+    }
+    if (locationMarker.group.visible) {
+      const phase = (elapsed % 2) / 2;
+      locationMarker.pulse.scale.setScalar(1 + phase * 1.75);
+      locationMarker.pulse.material.opacity = .58 * (1 - phase);
+      locationMarker.group.scale.setScalar(perspCam.position.distanceTo(controls.target) / 250);
     }
     if (selectRing.visible) {
       const s = 1 + Math.sin(elapsed * 4.5) * 0.1;
@@ -889,6 +1088,7 @@ export function createParkScene3D(container, onFrameLabels) {
     }
     for (const fn of animHooks) fn(elapsed);
     renderer.render(scene, activeCam);
+    onHeadingChange?.(getHeadingDeg());
 
     if (onFrameLabels) {
       const w = container.clientWidth;
@@ -907,6 +1107,10 @@ export function createParkScene3D(container, onFrameLabels) {
     focusPoints,
     clearSelection: () => { selectRing.visible = false; },
     resetOverview,
+    resetHeading,
+    getHeadingDeg,
+    setUserLocation,
+    setGroundOverlay,
     showRoute,
     showParadeRoute: () => showRoute(PARADE_ROUTE_NODES.map((id) => ROAD_NODES[id].pos), 0xc6954b),
     clearRoute,

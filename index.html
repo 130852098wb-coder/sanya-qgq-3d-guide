@@ -44,7 +44,7 @@
       position: absolute; left: 0; top: 0; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;
       opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .17s ease, visibility 0s .17s;
     }
-    .on-map { opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s; }
+    .on-map { opacity: 1; visibility: visible; transition-delay: 0s; }
     .map-label {
       height: 23px; padding: 0 9px; gap: 5px; border-radius: 20px; color: #282825; font-size: 11.5px; font-weight: 650;
       letter-spacing: .025em; background: rgba(255,250,236,.94); border-color: rgba(174,128,57,.66);
@@ -72,6 +72,12 @@
     .brand h1 { font: 700 23px/1.05 var(--serif); letter-spacing: .055em; white-space: nowrap; }
     #openHours { white-space: nowrap; font-size: 10.5px; font-weight: 650; color: var(--jade); border-radius: 20px; padding: 3px 7px; background: color-mix(in srgb,var(--jade) 10%,transparent); }
     .top-actions { display: flex; gap: 10px; }
+    .map-tools { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
+    .map-tools #zoneBar { min-width: 0; flex-wrap: wrap; }
+    .compass { pointer-events: auto; margin-top: 6px; opacity: .78; transition: opacity .15s, border-color .15s, box-shadow .15s; }
+    .compass.turned { opacity: 1; border-color: var(--gold); box-shadow: 0 0 0 2px #c6954b36,var(--shadow); }
+    .compass svg { width: 26px; height: 26px; }
+    #compassNeedle { transform-origin: 16px 16px; }
     .icon-button { display: inline-grid; place-items: center; position: relative; width: 34px; height: 34px; border-radius: 50%; flex: none; }
     .icon-button::after { position: absolute; content: ""; inset: -4px; border-radius: inherit; }
     .icon-button .icon { width: 17px; height: 17px; }
@@ -83,6 +89,9 @@
     .rail { position: absolute; inset-inline-end: max(20px,env(safe-area-inset-right)); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; }
     .rail-button { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; width: 48px; height: 48px; border-radius: 50%; line-height: 1; font-size: 10px; font-weight: 650; }
     .rail-button .icon { width: 17px; height: 17px; }
+    #btnLocate[data-location="live"] { color: var(--jade); border-color: var(--jade); }
+    #btnLocate[data-location="demo"] { color: var(--on-tint); border-color: var(--gold); }
+    #btnLocate[aria-busy="true"] .icon { animation: breathe 1s ease-in-out infinite; }
     .rail-button.hero { border-color: var(--gold); color: var(--on-tint); }
     .model-loader { position: absolute; left: 50%; top: 23%; transform: translateX(-50%); padding: 6px 12px; border-radius: 15px; font-size: 12px; text-align: center; pointer-events: none; transition: opacity .25s; }
     .model-loader.done { visibility: hidden; opacity: 0; }
@@ -101,9 +110,14 @@
     #serviceDock { padding: 0 14px; font-size: 13px; font-weight: 650; max-width: 230px; }
     #serviceDock span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #serviceDock .icon { width: 17px; height: 17px; color: var(--on-tint); }
-    .compare-bar { margin-top: 9px; display: flex; align-items: center; gap: 8px; width: max-content; max-width: 100%; font-size: 12px; padding: 5px 11px; border-radius: 18px; }
-    .compare-bar .icon { width: 15px; height: 15px; } .compare-bar input { width: 90px; }
+    .compare-bar { margin-top: 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 3px 8px; width: max-content; max-width: 100%; font-size: 12px; padding: 4px 9px 4px 4px; border-radius: 18px; }
+    .map-opacity { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .map-opacity input { width: clamp(54px,15vw,90px); }
     .compare-bar output { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+    .location-toast { pointer-events: auto; display: flex; gap: 9px; align-items: flex-start; margin-top: 7px; padding: 9px 11px; border-radius: 14px; width: max-content; max-width: min(100%,360px); font-size: 12px; }
+    .location-toast .close { width: 23px; height: 23px; }
+    .location-toast .close .icon { width: 13px; height: 13px; }
+    .external-nav { display: inline-block; margin-top: 4px; color: var(--on-tint); font-weight: 650; text-decoration: underline; text-underline-offset: 3px; }
     input[type="range"] { --progress: 50%; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; height: 24px; margin: 0; color: var(--red); }
     input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg,var(--red),var(--gold) var(--progress),var(--soft) var(--progress)); }
     input[type="range"]::-moz-range-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg,var(--red),var(--gold) var(--progress),var(--soft) var(--progress)); }
@@ -192,7 +206,8 @@
       .top-actions { gap: 6px; } #zoneBar { gap: 4px; margin-top: 6px; }
       .zone { font-size: 11px; padding: 7px 10px; }
       .rail { right: max(9px,env(safe-area-inset-right)); gap: 5px; }
-      .rail-button { width: 43px; height: 43px; }
+      .rail-button { position: relative; width: 40px; height: 40px; }
+      .rail-button::after { position: absolute; content: ""; inset: -2px; border-radius: inherit; }
       .main-dock { bottom: max(11px,env(safe-area-inset-bottom)); max-width: calc(100vw - 20px); }
       #scheduleDock { padding: 6px 10px 6px 8px; gap: 6px; } .dock-head { font-size: 14px; }
       #serviceDock { padding-inline: 8px; gap: 4px; font-size: 11.5px; max-width: 125px; }
@@ -247,7 +262,7 @@
     </defs>
   </svg>
   <main id="app" aria-label="三亚千古情互动导览图">
-    <div id="canvasWrap" aria-label="3D 实景地图，拖动平移，滚轮或双指缩放"></div>
+    <div id="canvasWrap" aria-label="3D 实景地图，单指平移，双指捏合缩放、扭转方向。鼠标左键平移、右键旋转、滚轮缩放"></div>
     <img id="compareImg" src="./assets/reference_map.png" alt="景区原导游图" aria-hidden="true">
     <div id="labelLayer" aria-label="地图地点"><svg id="leaderLines" aria-hidden="true"></svg></div>
     <div id="modelLoader" class="model-loader glass" role="status">正在加载景区模型…</div>
@@ -266,15 +281,32 @@
         <div class="top-actions" data-map-ui>
           <button class="icon-button glass" id="btnNight" aria-label="昼夜切换" title="昼夜切换" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-night"/></svg></button>
           <button class="icon-button glass" id="btnReset" aria-label="一键回全景" title="一键回全景"><svg class="icon" aria-hidden="true"><use href="#i-overview"/></svg></button>
-          <button class="icon-button glass" id="btnCompare" aria-label="1:1原图核对" title="1:1原图核对" aria-pressed="false" aria-controls="compareBar"><svg class="icon" aria-hidden="true"><use href="#i-map"/></svg></button>
+          <button class="icon-button glass" id="btnCompare" aria-label="手绘底图与1:1原图核对" title="手绘底图与1:1原图核对" aria-pressed="false" aria-expanded="false" aria-controls="compareBar"><svg class="icon" aria-hidden="true"><use href="#i-map"/></svg></button>
         </div>
       </div>
-      <nav id="zoneBar" aria-label="区域筛选" data-map-ui></nav>
+      <div class="map-tools">
+        <nav id="zoneBar" aria-label="区域筛选" data-map-ui></nav>
+        <button class="compass icon-button glass" id="btnCompass" aria-label="指南针，回正地图方向" title="回正地图方向" data-map-ui>
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="16" cy="16" r="13.4" fill="none" stroke="var(--gold)" stroke-width=".8"/>
+            <path d="M16 3v2m13 11h-2M16 29v-2M3 16h2" stroke="var(--gold)" stroke-width="1.2"/>
+            <g id="compassNeedle"><path d="m16 5 4.1 11-4.1 1.6-4.1-1.6Z" fill="#B8292F"/><path d="m16 27-4.1-11 4.1-1.6 4.1 1.6Z" fill="#C6954B"/><circle cx="16" cy="16" r="1.65" fill="#FFEDC9"/></g>
+          </svg>
+        </button>
+      </div>
       <div class="compare-bar glass" id="compareBar" hidden data-map-ui>
-        <label for="compareSlider">原图透明度</label><input type="range" id="compareSlider" min="0" max="100" value="55"><output id="compareVal" for="compareSlider">55%</output>
+        <div class="segments" role="group" aria-label="手绘底图模式">
+          <button id="groundMode" aria-pressed="false">贴地融合</button><button id="originalMode" aria-pressed="false">1:1原图核对</button>
+        </div>
+        <div class="map-opacity"><label for="compareSlider">透明度</label><input type="range" id="compareSlider" min="0" max="100" value="55"><output id="compareVal" for="compareSlider">55%</output></div>
+      </div>
+      <div class="location-toast glass" id="locationToast" hidden data-map-ui>
+        <div><p id="locationMessage" role="status"></p><a class="external-nav" id="externalNav" href="https://uri.amap.com/marker?position=109.5311,18.2915&amp;name=三亚千古情景区" target="_blank" rel="noopener noreferrer" hidden>前往三亚千古情（外部地图导航）</a></div>
+        <button class="close" id="closeLocationToast" aria-label="收起定位提示"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
       </div>
     </header>
     <nav class="rail" aria-label="景区工具" data-map-ui>
+      <button class="rail-button glass" id="btnLocate" aria-label="定位，查看我的位置" title="定位，查看我的位置"><svg class="icon" aria-hidden="true"><use href="#i-origin"/></svg>定位</button>
       <a class="rail-button glass hero" href="./showcase.html" title="360°精模特写"><svg class="icon" aria-hidden="true"><use href="#i-hero"/></svg>精模</a>
       <button class="rail-button glass" id="btnRestroomQuick" aria-pressed="false" title="定位全部洗手间"><svg class="icon" aria-hidden="true"><use href="#i-restroom"/></svg>洗手间</button>
       <button class="rail-button glass" id="btnLegendToggle" aria-controls="services" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-facilities"/></svg>设施</button>
@@ -289,6 +321,7 @@
       <div id="legendBox" class="facility-grid"></div>
       <div id="routePanel" hidden>
         <p class="origin"><svg class="icon" aria-hidden="true"><use href="#i-origin"/></svg><span id="originText"></span></p>
+        <a class="external-nav" id="routeExternal" href="https://uri.amap.com/marker?position=109.5311,18.2915&amp;name=三亚千古情景区" target="_blank" rel="noopener noreferrer" hidden>高德地图 · 前往景区</a>
         <div id="routeResult" class="route-result" hidden><p id="routeText"></p><button class="text-btn" id="btnClearRoute">清除路线</button></div>
         <label class="search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input id="destinationSearch" type="search" aria-label="搜索导航终点" placeholder="搜索场馆或设施，选择终点"></label>
         <div class="destinations" id="destinations"></div>
@@ -331,7 +364,7 @@
     <div id="schedList"></div>
   </dialog>
   <script type="module">
-    import { PARK_VENUES, VENUE_BY_ID, FACILITY_TYPES, SERVICE_FACILITIES, SCHEDULE_PRESETS, OFFICIAL_NOTICES, findWalkingRoute, getShowStatus, parseTimeToMinutes } from './park-data.js';
+    import { PARK_VENUES, VENUE_BY_ID, FACILITY_TYPES, SERVICE_FACILITIES, SCHEDULE_PRESETS, OFFICIAL_NOTICES, PARK_GEO_ANCHOR, ROAD_NODES, geoToParkXZ, findNearestRoadNode, findWalkingRoute, getShowStatus, parseTimeToMinutes } from './park-data.js';
     import { createParkScene3D } from './scene-3d.js';
 
     const $ = (id) => document.getElementById(id);
@@ -350,7 +383,7 @@
     const state = {
       zone: 'all', preset: 'regular_two_shows', minute: sanyaMinute(), liveClock: true,
       origin: 'entrance', selected: null, route: null, tab: 'facilities',
-      facilityTypes: new Set(), liveVenues: new Set(), night: false, compare: false,
+      facilityTypes: new Set(), liveVenues: new Set(), night: false, mapMode: 'scene',
     };
     let park3D;
     let serviceOpener = $('serviceDock');
@@ -436,7 +469,7 @@
       for (const pin of pins) {
         const { place, el, isFacility } = pin;
         const allowed = isFacility ? state.facilityTypes.has(place.type) : state.zone === 'all' || place.zone === state.zone;
-        if (!allowed || state.compare) { setPinVisibility(pin,false); continue; }
+        if (!allowed || state.mapMode === 'compare') { setPinVisibility(pin,false); continue; }
         const anchor = project(place.pos.x, isFacility ? 4 : place.pinHeight, place.pos.z);
         const w = pin.width || el.offsetWidth, h = pin.height || el.offsetHeight;
         if (!anchor.visible || anchor.x < 0 || anchor.x > width || anchor.y < 0 || anchor.y > height) { setPinVisibility(pin,false); continue; }
@@ -456,6 +489,7 @@
         }
         setPinVisibility(pin, !!box);
         if (!box) continue;
+        pin.hitBox = box;
         accepted.push(box);
         const transform = `translate3d(${box.x.toFixed(1)}px,${box.y.toFixed(1)}px,0) translate(-50%,-50%)`;
         if (pin.transform !== transform) { el.style.transform = transform; pin.transform = transform; }
@@ -481,7 +515,7 @@
       btn.dataset.zone = id;
       btn.textContent = name;
       btn.addEventListener('click', () => {
-        if (state.compare) toggleCompare(false);
+        leaveOriginal();
         closeCard(); closeServices(); setZone(id);
         if (id === 'all') park3D.resetOverview();
         else park3D.focusPoints(PARK_VENUES.filter((v) => v.zone === id).map((v) => ({...v.pos, y:v.pinHeight})));
@@ -499,7 +533,7 @@
         if (state.facilityTypes.has(type.id)) state.facilityTypes.delete(type.id);
         else {
           state.facilityTypes.add(type.id);
-          if (state.compare) toggleCompare(false);
+          leaveOriginal();
         }
         syncFacilities();
       });
@@ -513,7 +547,7 @@
     $('btnRestroomQuick').addEventListener('click', () => {
       const enable = !restroomTypes.every((t) => state.facilityTypes.has(t));
       closeServices(); closeCard();
-      if (state.compare) toggleCompare(false);
+      leaveOriginal();
       for (const type of restroomTypes) {
         if (enable) state.facilityTypes.add(type); else state.facilityTypes.delete(type);
       }
@@ -527,7 +561,7 @@
 
     function openServices(tab, opener) {
       closeCard();
-      if (state.compare) toggleCompare(false);
+      leaveOriginal();
       serviceOpener = opener;
       state.tab = tab;
       const facilities = tab === 'facilities';
@@ -563,9 +597,17 @@
     $('routeTab').addEventListener('click', () => openServices('route',serviceOpener));
     $('closeServices').addEventListener('click', () => closeServices(true));
 
+    let locationFix = null, deviceHeading = null;
+    const currentOrigin = 'current-location';
+    function routeOrigin() {
+      if (state.origin === currentOrigin) {
+        return { id: locationFix.nodeId, name: locationFix.demo ? '景区入口（模拟定位）' : '我的当前位置' };
+      }
+      return placeById.get(state.origin);
+    }
     function syncRoute() {
       const route = state.route;
-      $('originText').textContent = `起点 · ${placeById.get(state.origin).name}`;
+      $('originText').textContent = `起点 · ${routeOrigin().name}`;
       $('routeResult').hidden = !route;
       $('routeText').textContent = route?.detail || '';
       $('serviceDock').querySelector('span').textContent = route?.label || '设施 / 路线';
@@ -577,22 +619,27 @@
     $('btnClearRoute').addEventListener('click', () => {
       clearRoute(); $('announcement').textContent = '已清除路线'; $('routeTab').focus();
     });
-    function navigateTo(place) {
-      const origin = placeById.get(state.origin);
+    function drawWalkingRoute(place) {
+      const origin = routeOrigin();
       const route = findWalkingRoute(origin.id, place.id);
       if (!route) return;
-      if (state.compare) toggleCompare(false);
-      closeServices(); closeCard();
       const detail = route.distanceMeters
         ? `${origin.name} → ${place.name}，约 ${route.distanceMeters} 米，步行约 ${route.walkMinutes} 分钟`
         : `${origin.name}与${place.name}共用同一处步行入口`;
-      state.route = { label: route.distanceMeters ? `${route.walkMinutes} 分钟 · ${place.name}` : place.name, detail };
-      if (place.type) { state.facilityTypes.add(place.type); syncFacilities(); }
+      state.route = { destinationId: place.id, label: route.distanceMeters ? `${route.walkMinutes} 分钟 · ${place.name}` : place.name, detail };
       park3D.showRoute(route.points3D);
+      syncRoute();
+      return route;
+    }
+    function navigateTo(place) {
+      leaveOriginal();
+      const route = drawWalkingRoute(place);
+      if (!route) return;
+      closeServices(); closeCard();
+      if (place.type) { state.facilityTypes.add(place.type); syncFacilities(); }
       if (route.points3D.length > 1) park3D.focusPoints(route.points3D);
       else park3D.focusPoint(place.pos.x,place.pos.z,170);
-      syncRoute();
-      $('announcement').textContent = detail;
+      $('announcement').textContent = state.route.detail;
       $('serviceDock').focus({preventScroll:true});
     }
     function renderDestinations() {
@@ -626,7 +673,7 @@
     function selectPlace(place, show = null, opener = $('scheduleDock')) {
       if ($('schedSheet').open) $('schedSheet').close();
       closeServices();
-      if (state.compare) toggleCompare(false);
+      leaveOriginal();
       if (!place.type && state.zone !== 'all' && place.zone !== state.zone) setZone('all');
       cardOpener = opener;
       state.selected = place.id;
@@ -643,41 +690,187 @@
       $('vcShows').open = false;
       const rows = events.map((item) => { const p = document.createElement('p'); p.textContent = `${item.time}　${item.title}`; return p; });
       $('vcShows').querySelector('div').replaceChildren(...rows);
-      const isOrigin = state.origin === place.id;
-      $('btnNavFromGate').disabled = isOrigin; $('btnSetStart').disabled = isOrigin;
-      $('btnSetStart').querySelector('span').textContent = isOrigin ? '当前起点' : '设为起点';
+      syncStartButtons();
       $('venueHero').hidden = !['goddess_portal','interactive_hall'].includes(place.id);
       dirtyObstacles = true;
       $('vcName').focus({preventScroll:true});
     }
     $('btnCloseCard').addEventListener('click', () => closeCard(true));
     $('btnNavFromGate').addEventListener('click', () => navigateTo(placeById.get(state.selected)));
+    function syncStartButtons() {
+      if (!state.selected) return;
+      const isOrigin = state.origin === state.selected;
+      $('btnNavFromGate').disabled = isOrigin;
+      $('btnSetStart').disabled = isOrigin;
+      $('btnSetStart').querySelector('span').textContent = isOrigin ? '当前起点' : '设为起点';
+    }
     $('btnSetStart').addEventListener('click', () => {
       state.origin = state.selected;
       clearRoute();
-      $('btnSetStart').disabled = true;
-      $('btnSetStart').querySelector('span').textContent = '当前起点';
-      $('btnNavFromGate').disabled = true;
+      syncStartButtons();
       $('announcement').textContent = `已将${placeById.get(state.origin).name}设为起点`;
     });
 
+    const mapOpacity = { ground: 55, compare: 55 };
     function syncCompareOpacity() {
       const value = Number($('compareSlider').value);
       $('compareVal').textContent = value + '%';
       $('compareSlider').style.setProperty('--progress',value + '%');
-      $('compareImg').style.opacity = state.compare ? String(value / 100) : '0';
+      $('compareImg').style.opacity = state.mapMode === 'compare' ? String(value / 100) : '0';
+      park3D?.setGroundOverlay(state.mapMode === 'ground', value / 100);
     }
-    function toggleCompare(enabled) {
-      state.compare = enabled;
-      if (enabled) { closeServices(); closeCard(); }
+    function setMapMode(mode) {
+      const wasComparing = state.mapMode === 'compare', comparing = mode === 'compare', enabled = mode !== 'scene';
+      state.mapMode = mode;
+      if (comparing) { closeServices(); closeCard(); }
+      if (wasComparing !== comparing) park3D.setOrthoCompare(comparing);
       $('btnCompare').setAttribute('aria-pressed',String(enabled));
+      $('btnCompare').setAttribute('aria-expanded',String(enabled));
       $('compareBar').hidden = !enabled;
-      $('compareImg').setAttribute('aria-hidden',String(!enabled));
-      park3D.setOrthoCompare(enabled);
+      $('compareImg').setAttribute('aria-hidden',String(!comparing));
+      $('groundMode').setAttribute('aria-pressed', String(mode === 'ground'));
+      $('originalMode').setAttribute('aria-pressed', String(comparing));
+      if (enabled) $('compareSlider').value = mapOpacity[mode];
       syncCompareOpacity(); dirtyObstacles = true;
     }
-    $('btnCompare').addEventListener('click', () => toggleCompare(!state.compare));
-    $('compareSlider').addEventListener('input',syncCompareOpacity);
+    function leaveOriginal() { if (state.mapMode === 'compare') setMapMode('ground'); }
+    $('btnCompare').addEventListener('click', () => setMapMode(state.mapMode === 'scene' ? 'ground' : 'scene'));
+    $('groundMode').addEventListener('click', () => setMapMode('ground'));
+    $('originalMode').addEventListener('click', () => setMapMode('compare'));
+    $('compareSlider').addEventListener('input', () => {
+      mapOpacity[state.mapMode] = Number($('compareSlider').value);
+      syncCompareOpacity();
+    });
+    let lastHeading;
+    function updateCompass(deg) {
+      const heading = deg.toFixed(2);
+      if (heading === lastHeading) return;
+      lastHeading = heading;
+      $('compassNeedle').style.transform = `rotate(${heading}deg)`;
+      $('btnCompass').classList.toggle('turned', Math.abs(deg) >= 2);
+    }
+    $('btnCompass').addEventListener('click', () => { leaveOriginal(); park3D.resetHeading(); });
+
+    let toastTimer, watchId = null, locateRequest = 0, resumeWatch = false;
+    const geoOptions = { enableHighAccuracy: true, maximumAge: 5000, timeout: 12000 };
+    const gate = ROAD_NODES[VENUE_BY_ID.entrance.roadNode].pos, avenue = ROAD_NODES.n_totem_mid.pos;
+    const entranceHeading = PARK_GEO_ANCHOR.headingDeg + Math.atan2(avenue.x - gate.x, gate.z - avenue.z) * 180 / Math.PI;
+    function hideLocationToast() {
+      clearTimeout(toastTimer);
+      $('locationToast').hidden = true;
+      dirtyObstacles = true;
+    }
+    function locationToast(message, external = false) {
+      clearTimeout(toastTimer);
+      $('locationToast').hidden = false;
+      $('externalNav').hidden = !external;
+      $('locationMessage').textContent = message;
+      dirtyObstacles = true;
+      if (!external) toastTimer = setTimeout(hideLocationToast, 5000);
+    }
+    $('closeLocationToast').addEventListener('click', () => { hideLocationToast(); $('btnLocate').focus(); });
+
+    function placeUserMarker(focus = false) {
+      const { x, z, heading } = locationFix;
+      park3D.setUserLocation(x, z, deviceHeading ?? heading, true, focus);
+    }
+    function onOrientation(event) {
+      const screenAngle = window.screen.orientation?.angle ?? window.orientation ?? 0;
+      let heading;
+      if (Number.isFinite(event.webkitCompassHeading) && event.webkitCompassHeading >= 0) {
+        heading = event.webkitCompassHeading + screenAngle;
+      } else if ((event.absolute || event.type === 'deviceorientationabsolute') && Number.isFinite(event.alpha)) {
+        // 将屏幕上边缘投影到水平面，横屏时也计入手机的前倾和侧倾。
+        const rad = Math.PI / 180, screen = screenAngle * rad;
+        const beta = (event.beta ?? 0) * rad, gamma = (event.gamma ?? 0) * rad;
+        const east = Math.sin(screen) * Math.cos(gamma);
+        const north = Math.cos(screen) * Math.cos(beta) + Math.sin(screen) * Math.sin(beta) * Math.sin(gamma);
+        if (Math.hypot(east, north) < .001) return;
+        heading = Math.atan2(east, north) / rad - event.alpha;
+      } else return;
+      deviceHeading = (heading % 360 + 360) % 360;
+      if (locationFix) placeUserMarker();
+    }
+    async function enableDeviceCompass() {
+      const sensor = window.DeviceOrientationEvent;
+      if (!sensor) return;
+      try {
+        if (sensor.requestPermission && await sensor.requestPermission(true) !== 'granted') return;
+      } catch { return; }
+      window.addEventListener('deviceorientationabsolute', onOrientation);
+      window.addEventListener('deviceorientation', onOrientation);
+    }
+    function applyLocation(coords, requested = false) {
+      const geo = Number.isFinite(coords?.latitude) && Number.isFinite(coords?.longitude)
+        ? geoToParkXZ(coords.latitude, coords.longitude) : null;
+      const demo = !geo?.inPark, previous = locationFix;
+      const { x, z } = demo ? gate : geo;
+      const nodeId = demo ? VENUE_BY_ID.entrance.roadNode : findNearestRoadNode(x,z);
+      const modeChanged = !previous || previous.demo !== demo;
+      const heading = demo ? entranceHeading : (Number.isFinite(coords.heading) && coords.heading >= 0 ? coords.heading : null);
+      locationFix = { x, z, nodeId, demo, heading };
+      const previousOrigin = state.origin;
+      if (requested || modeChanged) state.origin = currentOrigin;
+      placeUserMarker(requested || modeChanged);
+
+      const locate = $('btnLocate');
+      locate.disabled = false;
+      locate.removeAttribute('aria-busy');
+      locate.dataset.location = demo ? 'demo' : 'live';
+      locate.title = demo ? '入口模拟定位，点击重新定位' : '回到我的当前位置';
+      $('routeExternal').hidden = !demo;
+      if (state.origin === currentOrigin && (modeChanged || previous?.nodeId !== nodeId || previousOrigin !== currentOrigin)) {
+        if (state.route?.destinationId) drawWalkingRoute(placeById.get(state.route.destinationId));
+        else syncRoute();
+        syncStartButtons();
+        if (!$('routePanel').hidden && !$('services').hidden) renderDestinations();
+      }
+      if (requested || modeChanged) {
+        const distance = geo ? `当前距景区 ${(geo.distanceFromParkMeters / 1000).toFixed(1)} km` : '未获取定位';
+        locationToast(demo ? distance + '，已开启入口实景定位演示' : '已定位您在园区内，可直接发起步行导航', demo);
+      }
+    }
+    function stopWatching() {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+    function watchLocation(request) {
+      if (!navigator.geolocation?.watchPosition) return;
+      watchId = navigator.geolocation.watchPosition(
+        (position) => { if (request === locateRequest) applyLocation(position.coords); },
+        (error) => {
+          if (request !== locateRequest) return;
+          if (error.code === 1) stopWatching();
+          applyLocation(null);
+        }, geoOptions);
+    }
+    $('btnLocate').addEventListener('click', () => {
+      leaveOriginal(); closeCard(); closeServices();
+      const request = ++locateRequest;
+      stopWatching();
+      enableDeviceCompass();
+      if (!navigator.geolocation) { applyLocation(null, true); return; }
+      $('btnLocate').disabled = true;
+      $('btnLocate').setAttribute('aria-busy','true');
+      locationToast('正在获取当前位置…');
+      try {
+        navigator.geolocation.getCurrentPosition((position) => {
+          if (request !== locateRequest) return;
+          applyLocation(position.coords, true);
+          watchLocation(request);
+        }, () => { if (request === locateRequest) applyLocation(null, true); }, geoOptions);
+      } catch { applyLocation(null, true); }
+    });
+    window.addEventListener('pagehide', () => {
+      resumeWatch = watchId !== null;
+      stopWatching();
+      locateRequest++;
+      $('btnLocate').disabled = false;
+      $('btnLocate').removeAttribute('aria-busy');
+    });
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted && resumeWatch) watchLocation(locateRequest);
+    });
     $('btnNight').addEventListener('click', () => {
       state.night = !state.night;
       document.body.classList.toggle('night-mode',state.night);
@@ -687,8 +880,8 @@
       park3D.setNightMode(state.night);
     });
     $('btnReset').addEventListener('click', () => {
-      if (state.compare) toggleCompare(false);
-      closeCard(); closeServices(); setZone('all'); park3D.resetOverview();
+      leaveOriginal();
+      closeCard(); closeServices(); setZone('all'); park3D.resetOverview(true);
     });
 
     function populateSchedule() {
@@ -817,17 +1010,38 @@
     tapOrSwipe($('scheduleDock'),-1,openSchedule);
     tapOrSwipe($('sheetHandle'),1,closeSchedule);
     $('closeSchedule').addEventListener('click',closeSchedule);
-    $('canvasWrap').addEventListener('pointerdown', () => { closeServices(); closeCard(); });
+    // 指针始终落到地图上，标签只响应短点按，任一指从标签起拖也能平移或扭转。
+    const mapSurface = $('canvasWrap');
+    let pinTap = null;
+    mapSurface.addEventListener('pointerdown', (event) => {
+      pinTap = null;
+      if (event.button === 0 && event.isPrimary) {
+        const rect = mapSurface.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top;
+        const pin = pins.find(({ shown, hitBox }) => shown && Math.abs(x - hitBox.x) <= hitBox.w / 2 && Math.abs(y - hitBox.y) <= hitBox.h / 2);
+        if (pin) pinTap = { pin, id: event.pointerId, x: event.clientX, y: event.clientY };
+      }
+      closeServices(); closeCard();
+    });
+    function movedFromPin(event) { return Math.hypot(event.clientX - pinTap.x, event.clientY - pinTap.y) > 6; }
+    mapSurface.addEventListener('pointermove', (event) => {
+      if (pinTap?.id === event.pointerId && movedFromPin(event)) pinTap = null;
+    });
+    mapSurface.addEventListener('pointerup', (event) => {
+      if (pinTap?.id === event.pointerId && !movedFromPin(event) && pinTap.pin.shown) pinTap.pin.el.click();
+      pinTap = null;
+    });
+    mapSurface.addEventListener('pointercancel', () => { pinTap = null; });
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || $('schedSheet').open) return;
       if (!$('services').hidden) closeServices(true);
       else if (!$('venueCard').hidden) closeCard(true);
-      else if (state.compare) { toggleCompare(false); $('btnCompare').focus(); }
+      else if (!$('locationToast').hidden) { hideLocationToast(); $('btnLocate').focus(); }
+      else if (state.mapMode !== 'scene') { setMapMode('scene'); $('btnCompare').focus(); }
     });
 
     populateSchedule(); setClockRange(); updateSchedule(); syncRoute(); syncCompareOpacity();
     try {
-      park3D = createParkScene3D($('canvasWrap'),projectLabels);
+      park3D = createParkScene3D($('canvasWrap'),projectLabels,updateCompass);
     } catch (error) {
       $('modelLoader').textContent = '3D 地图未能启动，请检查浏览器的图形加速后刷新';
       throw error;

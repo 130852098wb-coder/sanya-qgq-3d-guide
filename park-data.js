@@ -20,6 +20,28 @@ const SIN_T = Math.sin(THETA);
 const COS_P = Math.cos(PHI);
 const SIN_P = Math.sin(PHI);
 
+// WGS84，迎宾路333号。园区纵深（世界 -Z）的方位角从真北顺时针量起。
+export const PARK_GEO_ANCHOR = {
+  lat: 18.2915, lng: 109.5311, originXZ: { x: 0, z: 0 }, headingDeg: 45, parkRadiusMeters: 650,
+};
+
+export function geoToParkXZ(lat, lng) {
+  const anchor = PARK_GEO_ANCHOR;
+  const rad = Math.PI / 180;
+  const lat0 = anchor.lat * rad, lat1 = lat * rad, dLng = (lng - anchor.lng) * rad;
+  const a = Math.sin((lat1 - lat0) / 2) ** 2 + Math.cos(lat0) * Math.cos(lat1) * Math.sin(dLng / 2) ** 2;
+  const distanceFromParkMeters = 2 * 6371008.8 * Math.asin(Math.sqrt(Math.min(1, a)));
+  const bearing = Math.atan2(Math.sin(dLng) * Math.cos(lat1),
+    Math.cos(lat0) * Math.sin(lat1) - Math.sin(lat0) * Math.cos(lat1) * Math.cos(dLng));
+  const localAngle = bearing - anchor.headingDeg * rad;
+  return {
+    x: anchor.originXZ.x + distanceFromParkMeters * Math.sin(localAngle),
+    z: anchor.originXZ.z - distanceFromParkMeters * Math.cos(localAngle),
+    distanceFromParkMeters,
+    inPark: distanceFromParkMeters <= anchor.parkRadiusMeters,
+  };
+}
+
 // 导游图地面像素(u, v)反解为3D地面世界坐标(x, z)，单位：米
 export function uvToXZ(u, v) {
   const du = (u - MAP_CALIBRATION.u0) / MAP_CALIBRATION.pixelsPerMeter;
@@ -619,6 +641,15 @@ for (const [a, b] of ROAD_EDGES) {
   const dist = Math.hypot(pa.x - pb.x, pa.z - pb.z);
   ADJ[a].push({ to: b, dist });
   ADJ[b].push({ to: a, dist });
+}
+
+export function findNearestRoadNode(x, z) {
+  let nearest = null, best = Infinity;
+  for (const [id, { pos }] of Object.entries(ROAD_NODES)) {
+    const squared = (x - pos.x) ** 2 + (z - pos.z) ** 2;
+    if (squared < best) { best = squared; nearest = id; }
+  }
+  return nearest;
 }
 
 function resolveRoadNodeId(idOrNode) {
